@@ -1,27 +1,9 @@
-name: Update predictions
-
-on:
-  schedule:
-    - cron: "17 11,23 * * *"
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  predict:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Make predictions
-        run: python3 predict.py
-        env:
-          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALLTOKEN }}
-      - name: Save to the repo
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git add data
-          git diff --cached --quiet || git commit -m "Update predictions"
-          git push
-```
+{"name": "Update predictions",
+"on": {"schedule": [{"cron": "17 11,23 * * *"}], "workflow_dispatch": {}},
+"permissions": {"contents": "write"},
+"jobs": {"predict": {"runs-on": "ubuntu-latest", "steps": [
+{"uses": "actions/checkout@v4"},
+{"name": "Make predictions", "run": "python3 predict.py",
+"env": {"FOOTBALL_DATA_TOKEN": "${{ secrets.FOOTBALLTOKEN }}"}},
+{"name": "Save to the repo", "run": "git config user.name github-actions\ngit config user.email github-actions@users.noreply.github.com\ngit add data\ngit diff --cached --quiet || git commit -m 'Update predictions'\ngit push"}
+]}}}
