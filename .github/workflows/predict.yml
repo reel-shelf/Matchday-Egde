@@ -16,7 +16,7 @@ jobs:
       - name: Make predictions
         run: python3 predict.py
         env:
-          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALLTOKEN }}
       - name: Save to the repo
         run: |
           git config user.name "github-actions"
