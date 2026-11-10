@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 API = "https://api.football-data.org/v4"
 LEAGUES = {"PL": "Premier League", "PD": "La Liga", "SA": "Serie A"}
 
-DAYS_AHEAD = 10        # how far ahead to predict
+DAYS_AHEAD = 14        # how far ahead to predict
 HALF_LIFE_DAYS = 120   # a game this old counts half as much as one today
 PRIOR = 4.0            # pulls teams with few games towards average
 NEWCOMER = (0.85, 1.15)  # promoted teams start a bit weaker (attack, defence)
