@@ -274,8 +274,9 @@ def save(state, news):
 
 
 def main():
-    key = os.environ.get("API_FOOTBALL_KEY")
-    rapid_key = os.environ.get("RAPIDAPI_KEY")
+    # strip stray spaces, line breaks or quotes picked up when copying the key
+    key = (os.environ.get("API_FOOTBALL_KEY") or "").strip().strip('"\'').strip()
+    rapid_key = (os.environ.get("RAPIDAPI_KEY") or "").strip().strip('"\'').strip()
     if not key and not rapid_key:
         print("Neither API_FOOTBALL_KEY nor RAPIDAPI_KEY is set yet, so there is no team news to fetch.")
         return
