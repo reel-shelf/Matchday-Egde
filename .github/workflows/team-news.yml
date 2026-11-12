@@ -26,6 +26,7 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALLTOKEN }}
           LIVE_DIR: live/data
+          API_FOOTBALL_DAILY_LIMIT: "60"   # the other ~40 calls a day are for intl.py
         run: |
           git config --global user.name github-actions
           git config --global user.email github-actions@users.noreply.github.com

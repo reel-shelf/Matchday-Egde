@@ -181,6 +181,10 @@ def check(api, state, matches, now, final_only=False):
     mp = state["map"]
 
     # 1. Find each game's API-Football fixture id (one call per day of games).
+    #    International games (intl.py) already carry it.
+    for m in matches:
+        if m.get("af") and str(m["id"]) not in mp:
+            mp[str(m["id"])] = {"af": m["af"], "homeId": m["homeAf"], "awayId": m["awayAf"]}
     if not final_only:
         for d in sorted({m["date"][:10] for m in matches if str(m["id"]) not in mp}):
             fetched = state["dates"].get(d)
@@ -245,18 +249,20 @@ def check(api, state, matches, now, final_only=False):
     # 4. Bookmaker odds for the next 3 days, refreshed every 12 hours per league and day.
     #    Problems here (e.g. a plan limit) are saved but don't stop the other checks.
     if not final_only:
-        pairs = sorted({(m["league"], m["date"][:10]) for m in mapped if 0 < to_kick(m) < ODDS_AHEAD})
+        # (API-Football league id, season, day); internationals carry their own league and season
+        pairs = sorted({(m.get("afLeague") or LEAGUE_IDS[m["league"]],
+                         m.get("season") or season_of(m["date"]), m["date"][:10])
+                        for m in mapped if 0 < to_kick(m) < ODDS_AHEAD})
         try:
-            for code, d in pairs:
-                at = state["oddsAt"].get(f"{code}:{d}")
+            for lid, season, d in pairs:
+                at = state["oddsAt"].get(f"{lid}:{d}")
                 if at and now - parse(at) < 12 * 3600:
                     continue
                 if api.limit - state["calls"] < ODDS_RESERVE:
                     break
-                season = season_of(d + "T12:00:00Z")
                 page, total = 1, 1
                 while page <= min(total, 3):
-                    body = api.get(f"/odds?league={LEAGUE_IDS[code]}&season={season}&date={d}"
+                    body = api.get(f"/odds?league={lid}&season={season}&date={d}"
                                    f"&bookmaker={BOOKMAKER}&page={page}", full=True)
                     total = int((body.get("paging") or {}).get("total") or 1)
                     for item in body.get("response") or []:
@@ -265,7 +271,7 @@ def check(api, state, matches, now, final_only=False):
                         if o and fid:
                             state["odds"][str(fid)] = {**o, "at": iso(now)}
                     page += 1
-                state["oddsAt"][f"{code}:{d}"] = iso(now)
+                state["oddsAt"][f"{lid}:{d}"] = iso(now)
             state["oddsError"] = None
         except (RuntimeError, urllib.error.URLError, OSError) as e:
             state["oddsError"] = str(e)
@@ -273,7 +279,7 @@ def check(api, state, matches, now, final_only=False):
 
     # 5. Key players (top scorers and assisters), one league per run, refreshed weekly.
     if not final_only and api.limit - state["calls"] >= 20:
-        for code in sorted({m["league"] for m in matches}):
+        for code in sorted({m["league"] for m in matches if m["league"] in LEAGUE_IDS}):
             k = state["key"].get(code)
             if k and now - parse(k["at"]) < KEY_PLAYERS_MAX_AGE:
                 continue
@@ -370,7 +376,7 @@ def main():
 
     preds = load_json(os.path.join(OUT_DIR, "predictions.json"), {"matches": []})
     matches = [m for m in preds.get("matches", [])
-               if m.get("league") in LEAGUE_IDS and -10 * MIN < parse(m["date"]) - now < ODDS_AHEAD]
+               if (m.get("league") in LEAGUE_IDS or m.get("af")) and -10 * MIN < parse(m["date"]) - now < ODDS_AHEAD]
     keep = {str(m["id"]) for m in matches}
     for k in ("raw", "map"):
         state[k] = {i: v for i, v in state[k].items() if i in keep}

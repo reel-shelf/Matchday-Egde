@@ -277,7 +277,7 @@
 
 <script>
 const LEAGUES = { PL: "Premier League", PD: "La Liga", SA: "Serie A", BL1: "Bundesliga", FL1: "Ligue 1",
-  CL: "Champions League", ELC: "Championship", DED: "Eredivisie", PPL: "Primeira Liga" };
+  CL: "Champions League", ELC: "Championship", DED: "Eredivisie", PPL: "Primeira Liga", INT: "Internationals" };
 // Team news, odds, live scores and the parlay record are updated every 5 minutes on the
 // live-data branch and read straight from GitHub, so they show up without a new app release.
 const LIVE_URL = "https://raw.githubusercontent.com/reel-shelf/Matchday-Egde/live-data/data/";
@@ -491,7 +491,7 @@ function card(m) {
     ? m.h2h.map(g => `<div class="h2h"><span>${esc(g.date.slice(0, 7))}</span><span>${esc(g.home)} v ${esc(g.away)}</span><b>${g.score[0]}-${g.score[1]}</b></div>`).join("")
     : `<div class="note">No meetings in the last few seasons.</div>`;
   return `<div class="card" data-id="${m.id}" id="m${m.id}">
-    <div class="meta"><span>${esc(LEAGUES[m.league] || m.league)}${m.matchday ? " · MD " + m.matchday : ""}</span>
+    <div class="meta"><span>${m.compName ? `🌍 ${esc(m.compName)}` : esc(LEAGUES[m.league] || m.league)}${m.matchday ? " · MD " + m.matchday : ""}</span>
       <span>${liveTag(m) || d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>
     <div class="teams">
       <div class="team"><div class="nm">${crest(m.home.crest)}<span>${isFav(H) ? `<b class="star">★</b> ` : ""}${esc(H)}</span></div>${formChips(m.home.form)}</div>
