@@ -313,7 +313,10 @@ function legWins(k, [h, a]) {
   return { "1": h > a, "2": a > h, X: h === a, "1X": h >= a, X2: a >= h, "12": h !== a,
     O15: h + a >= 2, O25: h + a >= 3, O35: h + a >= 4, BTTS: h > 0 && a > 0 }[k];
 }
-const bookOf = (m, k) => { const o = (odds.matches || {})[m.id], v = o && o[k]; return v > 1 ? v : null; };
+// Bookmaker odds: Bet365 for club games (odds.json), DraftKings via ESPN for internationals (in the match).
+const oddsFor = m => (odds.matches || {})[m.id] || m.odds;
+const bookOf = (m, k) => { const o = oddsFor(m), v = o && o[k]; return v > 1 ? v : null; };
+const bookName = m => (oddsFor(m) || {}).book || "Bookmaker";
 const valueOf = (p, o) => o ? o * p / 100 - 1 : null;
 const pctv = v => `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
 const scoreOf = m => (liveScores.matches || {})[m.id];
@@ -332,23 +335,24 @@ function legRow(l, extra = "", del = "") {
   const bk = l.k ? bookOf(l.m, l.k) : null, v = valueOf(l.p, bk);
   return `<div class="leg" data-go="${l.m.id}"><div class="t"><div>${esc(l.label)}${extra}${newsTag(l.m)}${v >= VALUE_MIN ? `<span class="vb">VALUE</span>` : ""}</div>
     <div>${esc(l.m.home.name)} v ${esc(l.m.away.name)} · ${esc(shortDate(l.m.date))}</div></div>
-    <div class="lr">${legStatus(l)}<b>${l.p}%</b>${bk ? `<small>Bet365 ${bk.toFixed(2)}</small>` : ""}</div>${del}</div>`;
+    <div class="lr">${legStatus(l)}<b>${l.p}%</b>${bk ? `<small>${esc(bookName(l.m))} ${bk.toFixed(2)}</small>` : ""}</div>${del}</div>`;
 }
 const fmtOdds = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2);
 function bookTotal(legs) {
   const ps = legs.map(l => l.k ? bookOf(l.m, l.k) : null);
   return legs.length && ps.every(Boolean) ? ps.reduce((x, y) => x * y, 1) : null;
 }
+const books = legs => [...new Set(legs.map(l => bookName(l.m)))].join(" / ");
 function oddsSummary(legs, fair) {
   const bk = bookTotal(legs);
   if (!bk) return `<div class="odds"><span>Fair odds</span><b>${fmtOdds(fair)}</b></div>
-    <div class="note" style="margin:6px 0 0">Only worth betting if a bookmaker pays more than ${fmtOdds(fair)}.${legs.some(l => l.k && bookOf(l.m, l.k)) ? " Bet365 doesn't price every pick here yet." : ""}</div>`;
+    <div class="note" style="margin:6px 0 0">Only worth betting if a bookmaker pays more than ${fmtOdds(fair)}.${legs.some(l => l.k && bookOf(l.m, l.k)) ? " The bookmaker doesn't price every pick here yet." : ""}</div>`;
   const v = bk / fair - 1;
   return `<div class="odds"><span>Fair odds</span><b>${fmtOdds(fair)}</b></div>
-    <div class="odds" style="border-top:0;margin-top:0;padding-top:2px"><span>Bet365 pays</span><b>${fmtOdds(bk)}</b></div>
+    <div class="odds" style="border-top:0;margin-top:0;padding-top:2px"><span>${books(legs)} pays</span><b>${fmtOdds(bk)}</b></div>
     <div class="note" style="margin:6px 0 0;${v >= VALUE_MIN ? "color:var(--accent2)" : ""}">${v >= VALUE_MIN
-      ? `💰 Value: Bet365 pays ${pctv(v)} more than the fair price.`
-      : `No value: Bet365 pays ${v < 0 ? `${pctv(-v).slice(1)} less than` : "about the same as"} the fair price.`}</div>`;
+      ? `💰 Value: ${books(legs)} pays ${pctv(v)} more than the fair price.`
+      : `No value: ${books(legs)} pays ${v < 0 ? `${pctv(-v).slice(1)} less than` : "about the same as"} the fair price.`}</div>`;
 }
 function liveTag(m) {
   const s = scoreOf(m);
@@ -520,10 +524,9 @@ function card(m) {
         <div class="stat"><small>Over 1.5 goals</small><b>${f.over15}%</b></div>
         <div class="stat"><small>Over 2.5 goals</small><b>${f.over25}%</b></div>
         <div class="stat"><small>Over 3.5 goals</small><b>${f.over35}%</b></div>
-        <div class="stat"><small>More goals in</small><b>${busier}</b></div>
+        ${m.league === "INT" ? "" : `<div class="stat"><small>More goals in</small><b>${busier}</b></div>`}
       </div>
-      ${halfBlock("First half", m.h1, H, A)}
-      ${halfBlock("Second half", m.h2, H, A)}
+      ${m.league === "INT" ? "" : halfBlock("First half", m.h1, H, A) + halfBlock("Second half", m.h2, H, A)}
       ${cornersBlock(m.corners)}
       <div class="sub">Head to head</div>
       ${h2h}
@@ -563,7 +566,7 @@ function marketsTable(m) {
   }).join("");
   return `<div class="sub" style="margin-top:0">Odds · tap + to add to My parlay</div>
     <div class="stat" style="padding:4px 10px"><table class="ctable mk">
-      <tr><th>Pick</th><th>Chance</th><th>Fair</th><th>Bet365</th><th></th></tr>${rows}</table></div>
+      <tr><th>Pick</th><th>Chance</th><th>Fair</th><th>${esc(has ? bookName(m) : "Odds")}</th><th></th></tr>${rows}</table></div>
     ${has ? "" : `<div class="note" style="margin-top:4px">Bookmaker odds appear about 3 days before kick-off.</div>`}`;
 }
 
@@ -581,7 +584,7 @@ function valueBox(list) {
   if (!top.length) return "";
   return `<div class="best" style="border-color:rgba(245,197,66,.4);background:linear-gradient(180deg,rgba(245,197,66,.10),rgba(245,197,66,.02))">
     <h3 style="color:var(--accent2)">💰 Value bets</h3>
-    <div class="note" style="margin:0 0 4px">Bet365 pays more than our chances say it should.</div>` + top.map(x =>
+    <div class="note" style="margin:0 0 4px">The bookmaker pays more than our chances say it should.</div>` + top.map(x =>
     `<div class="bp" data-go="${x.m.id}"><div class="t"><div>${esc(mlabel(x.m, x.k))} · ${x.o.toFixed(2)}</div>
       <div>${esc(x.m.home.name)} v ${esc(x.m.away.name)} · our chance ${x.p}%</div></div>
       <b style="color:var(--accent2)">${pctv(x.v)}</b></div>`).join("") + `</div>`;
@@ -745,7 +748,7 @@ function renderParlay() {
   return slipCard() + tierCard(soon)
     + parlayCard("Short parlay", "3 safest picks: the easier one to win", safe, false)
     + parlayCard("Big parlay", "Straight wins only: bigger payout, harder to win", wins, true)
-    + (news.updated ? `<div class="note">Team news checked ${esc(ago(news.updated))}. Games marked TEAM NEWS have odds adjusted for injuries, suspensions and lineups. Lineups are re-checked in the last 5 minutes before kick-off. Bet365 odds are refreshed twice a day for games in the next 3 days.</div>` : "")
+    + (news.updated ? `<div class="note">Team news checked ${esc(ago(news.updated))}. Games marked TEAM NEWS have odds adjusted for injuries, suspensions and lineups. Lineups are re-checked in the last 5 minutes before kick-off. Bookmaker odds are refreshed twice a day.</div>` : "")
     + `<div class="note">Picks come from games in the next 2 weeks, one pick per game. Picks are combined as separate games, so the chance all win is each chance multiplied together. For entertainment only. If you bet, bet responsibly and only if you are of legal age.</div>`;
 }
 
@@ -822,7 +825,7 @@ function parlayRecord() {
       <div class="${profit >= 0 ? "pos" : "neg"}">${g.n ? `${profit >= 0 ? "+" : ""}${profit.toFixed(2)}` : "–"}</div>`;
   }).join("");
   html += `<div class="card"><div class="rec"><div class="h">Parlay</div><div class="h">Record</div><div class="h">Profit</div>${rows}</div>
-    <div class="note" style="margin:8px 0 0">Profit if you'd put 1 unit on each parlay, at Bet365 odds when they were available, otherwise at fair odds.</div></div>`;
+    <div class="note" style="margin:8px 0 0">Profit if you'd put 1 unit on each parlay, at bookmaker odds when they were available, otherwise at fair odds.</div></div>`;
   const icon = r => r === true ? "✓" : r === false ? "✗" : r === "void" ? "–" : "·";
   html += `<div class="card">` + days.slice(0, 7).map(([day, d]) => `<div class="pday" style="display:block">
       <div style="color:var(--muted);font-size:12px;margin-bottom:4px">${esc(new Date(day + "T12:00:00Z").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }))}</div>

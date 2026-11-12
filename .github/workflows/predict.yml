@@ -16,10 +16,8 @@ jobs:
         run: python3 predict.py
         env:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALLTOKEN }}
-      - name: International games
+      - name: International games (ESPN + open results dataset, no key needed)
         run: python3 intl.py || echo "intl.py failed; club predictions are still saved"
-        env:
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
       - name: Save to the repo
         run: |
           git config user.name github-actions

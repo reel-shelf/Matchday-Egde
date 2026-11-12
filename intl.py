@@ -1,198 +1,230 @@
 #!/usr/bin/env python3
 """
-Matchday Edge: international games (national teams).
+Matchday Edge: international games (national teams). Free sources, no API key.
 
-football-data.org's free plan has no internationals, so this uses API-Football:
-1. Keeps a results file (data/intl-results.json) with the last 3 years of national
-   team games: Nations League, friendlies, World Cup and Euro qualifiers, and the
-   big tournaments. Past seasons are downloaded once; current ones are refreshed
-   each run. The first fill is spread over a few runs to stay inside the free
-   plan's 100 calls a day.
+1. History: the open international results dataset (github.com/martj42/international_results,
+   every men's international since 1872), last 3 years, plus recent results from ESPN
+   for the weeks the dataset hasn't caught up with yet.
 2. Rates every national team with the same Poisson model as the clubs (predict.py),
-   but older games count for more, because national teams play less often.
-3. Adds the next 14 days of international games to predictions.json (league "INT")
-   and locks their picks into history.json, so parlays, team news, odds and the
-   track record include them too.
+   with older games counting for more, because national teams play less often.
+3. Upcoming games for the next 14 days from ESPN's free (unofficial) scoreboard:
+   Nations League, friendlies, qualifiers and tournaments, with bookmaker odds
+   (DraftKings) when ESPN has them.
+4. Adds them to predictions.json (league "INT") and locks/grades their picks in
+   history.json, so parlays and the track record include them.
 
-Runs after predict.py in .github/workflows/predict.yml. Needs API_FOOTBALL_KEY.
+Runs after predict.py in .github/workflows/predict.yml. ESPN's feed isn't an official
+API: if it changes, international games simply stop appearing; club games are unaffected.
 """
+import csv
+import gzip
+import io
 import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import predict
-import team_news
 
 OUT_DIR = os.environ.get("OUT_DIR", "data")
 CACHE_PATH = os.path.join(OUT_DIR, "intl-results.json")
-COMPS = {
-    5: "Nations League", 10: "Friendly", 32: "World Cup qualifier", 960: "Euro qualifier",
-    1: "World Cup", 4: "Euro Championship", 9: "Copa América", 6: "Africa Cup of Nations",
-    7: "Asian Cup", 22: "Gold Cup", 536: "CONCACAF Nations League",
-    34: "World Cup qualifier", 29: "World Cup qualifier", 30: "World Cup qualifier", 31: "World Cup qualifier",
+RESULTS_CSV = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+ESPN = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+SLUGS = {
+    "uefa.nations": "Nations League", "fifa.friendly": "Friendly", "concacaf.nations.league": "CONCACAF Nations League",
+    "fifa.worldq.uefa": "World Cup qualifier", "fifa.worldq.conmebol": "World Cup qualifier",
+    "fifa.worldq.caf": "World Cup qualifier", "fifa.worldq.afc": "World Cup qualifier",
+    "fifa.worldq.concacaf": "World Cup qualifier", "uefa.euroq": "Euro qualifier",
+    "fifa.world": "World Cup", "uefa.euro": "Euro Championship", "conmebol.america": "Copa América",
+    "caf.nations": "Africa Cup of Nations", "afc.asian.cup": "Asian Cup", "concacaf.gold": "Gold Cup",
 }
+# ESPN name -> name used by the results dataset
+ALIASES = {"Bosnia-Herzegovina": "Bosnia and Herzegovina", "Chinese Taipei": "Taiwan", "Czechia": "Czech Republic",
+           "Kyrgyz Republic": "Kyrgyzstan", "Türkiye": "Turkey", "St. Kitts and Nevis": "Saint Kitts and Nevis",
+           "St. Lucia": "Saint Lucia", "St. Martin": "Saint Martin", "St. Vincent and the Grenadines":
+           "Saint Vincent and the Grenadines", "USA": "United States", "Korea Republic": "South Korea",
+           "Korea DPR": "North Korea", "Côte d'Ivoire": "Ivory Coast", "Cape Verde Islands": "Cape Verde",
+           "Congo DR": "DR Congo", "IR Iran": "Iran", "Curacao": "Curaçao"}
 HISTORY_DAYS = 3 * 365
 DAYS_AHEAD = 14
 HALF_LIFE_DAYS = 400       # clubs use 150; national teams play far less often
-RESERVE = 40               # always leave this many calls a day for team news and odds
-MAX_CALLS = 40             # most calls one run may use
-ID_OFFSET = 10 ** 9        # keeps these ids apart from football-data.org's
-FINISHED = {"FT", "AET", "PEN", "AWD", "WO"}
-DROPPED = {"PST", "CANC", "ABD"}
+ID_OFFSET = 10 ** 10       # keeps these ids apart from football-data.org's
 
 
-def now_utc():
-    return datetime.now(timezone.utc)
-
-
-def iso(d):
-    return d.isoformat().replace("+00:00", "Z")
-
-
-def fixture_row(f):
-    fx, lg, tm, sc = f["fixture"], f["league"], f["teams"], f.get("score") or {}
-    ft, ht = sc.get("fulltime") or {}, sc.get("halftime") or {}   # fulltime = after 90 minutes
-    pair = lambda s: [s["home"], s["away"]] if s.get("home") is not None and s.get("away") is not None else None
-    return {"id": fx["id"], "league": lg["id"], "season": lg.get("season"), "round": lg.get("round"),
-            "date": fx["date"], "status": (fx.get("status") or {}).get("short"),
-            "home": {"id": tm["home"]["id"], "name": tm["home"]["name"], "logo": tm["home"].get("logo")},
-            "away": {"id": tm["away"]["id"], "name": tm["away"]["name"], "logo": tm["away"].get("logo")},
-            "ft": pair(ft), "ht": pair(ht)}
-
-
-def update_cache(api, cache, now):
-    """Download what's missing or current, newest first, within this run's call budget."""
-    if not cache.get("leaguesAt") or now - predict.parse_time(cache["leaguesAt"]) > timedelta(days=7):
-        seasons = {}
-        for lg in api.get("/leagues"):
-            lid = (lg.get("league") or {}).get("id")
-            if lid in COMPS:
-                seasons[str(lid)] = [{"year": s["year"], "start": s.get("start"), "end": s.get("end"),
-                                      "current": s.get("current")} for s in lg.get("seasons") or []]
-        cache["seasons"], cache["leaguesAt"] = seasons, iso(now)
-    cutoff = (now - timedelta(days=HISTORY_DAYS)).date().isoformat()
-    today = now.date().isoformat()
-    todo = []
-    for lid, seasons in cache["seasons"].items():
-        for s in seasons:
-            if (s.get("end") or "9999") < cutoff:
-                continue
-            key = f"{lid}:{s['year']}"
-            current = s.get("current") or (s.get("end") or "9999") >= (now - timedelta(days=3)).date().isoformat()
-            fetched = cache["fetched"].get(key)
-            if fetched and not current:
-                continue                     # past season, already downloaded
-            if fetched and current and now - predict.parse_time(fetched) < timedelta(hours=10):
-                continue
-            starts_soon = (s.get("start") or "9999") <= (now + timedelta(days=DAYS_AHEAD)).date().isoformat()
-            if current and not starts_soon:
-                continue
-            todo.append((0 if current else 1, -(int(s["year"])), lid, s["year"], key))
-    todo.sort()
-    blocked = lambda k: "Free plans do not have access" in cache.get("errors", {}).get(k, "") \
-        and now - predict.parse_time(cache.get("errorsAt", {}).get(k, iso(now))) < timedelta(days=7)
-    for _, _, lid, year, key in todo:
-        if blocked(key):
-            continue                         # the plan doesn't include this season; retry weekly
-        time.sleep(7)                        # free plan: at most 10 calls a minute
-        if api.state["calls"] >= api.limit:
-            print("Call budget for this run used; the rest next run.")
-            break
+def get(url, raw=False):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept-Encoding": "gzip"})
+    for attempt in range(3):
         try:
-            rows = api.get(f"/fixtures?league={lid}&season={year}")
-        except RuntimeError as e:          # e.g. a season the plan doesn't include
-            cache.setdefault("errors", {})[key] = str(e)
-            cache.setdefault("errorsAt", {})[key] = iso(now)
-            print(e)
-            continue
-        cache.get("errors", {}).pop(key, None)
-        for f in rows:
-            r = fixture_row(f)
-            cache["games"][str(r["id"])] = r
-        cache["fetched"][key] = iso(now)
-    # drop games older than we need
-    cache["games"] = {k: g for k, g in cache["games"].items() if g["date"][:10] >= cutoff}
+            with urllib.request.urlopen(req, timeout=30) as r:
+                body = r.read()
+                if r.headers.get("Content-Encoding") == "gzip":
+                    body = gzip.decompress(body)
+                return body.decode() if raw else json.loads(body)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            if attempt == 2:
+                print("Could not load", url.split("?")[0], "-", e)
+                return None
+            time.sleep(3)
+
+
+def canon(name):
+    return ALIASES.get(name, name)
+
+
+def american_to_decimal(ml):
+    try:
+        ml = float(ml)
+    except (TypeError, ValueError):
+        return None
+    if ml == 0:
+        return None
+    return round(1 + ml / 100 if ml > 0 else 1 + 100 / abs(ml), 2)
+
+
+def espn_odds(comp):
+    """Bookmaker odds from ESPN's scoreboard, in decimal, keyed by the app's markets."""
+    o = (comp.get("odds") or [None])[0]
+    if not o:
+        return None
+    ml = lambda side: american_to_decimal((o.get(side) or {}).get("moneyLine"))
+    out = {"book": (o.get("provider") or {}).get("name") or "Bookmaker",
+           "1": ml("homeTeamOdds"), "2": ml("awayTeamOdds"), "X": ml("drawOdds")}
+    line = o.get("overUnder")
+    over = american_to_decimal(o.get("overOdds"))
+    if over and line in (1.5, 2.5, 3.5):
+        out[{1.5: "O15", 2.5: "O25", 3.5: "O35"}[line]] = over
+    out = {k: v for k, v in out.items() if v}
+    return out if len(out) > 1 else None
+
+
+def espn_day(slug, day):
+    sb = get(f"{ESPN}/{slug}/scoreboard?dates={day.strftime('%Y%m%d')}")
+    time.sleep(0.25)
+    return (sb or {}).get("events") or []
+
+
+def parse_event(slug, e):
+    c = e["competitions"][0]
+    side = {x.get("homeAway"): x for x in c["competitors"]}
+    if "home" not in side or "away" not in side:
+        return None
+    st = e["status"]["type"]
+    score = lambda x: int(x["score"]) if str(x.get("score", "")).isdigit() else None
+    return {"espn": e["id"], "slug": slug, "comp": SLUGS[slug], "date": e["date"],
+            "state": st.get("state"), "completed": bool(st.get("completed")),
+            "neutral": bool(c.get("neutralSite")),
+            "home": {"name": canon(side["home"]["team"]["displayName"]), "logo": side["home"]["team"].get("logo")},
+            "away": {"name": canon(side["away"]["team"]["displayName"]), "logo": side["away"]["team"].get("logo")},
+            "ft": [score(side["home"]), score(side["away"])], "odds": espn_odds(c)}
 
 
 def main():
-    key = (os.environ.get("API_FOOTBALL_KEY") or "").strip().strip('"\'').strip()
-    if not key:
-        print("API_FOOTBALL_KEY is not set, so no international games.")
-        return
-    now = now_utc()
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=HISTORY_DAYS)).date().isoformat()
     cache = predict.load_json(CACHE_PATH, {})
-    cache.setdefault("seasons", {}); cache.setdefault("fetched", {}); cache.setdefault("games", {})
-    budget = cache.setdefault("budget", {"day": "", "calls": 0})
-    if budget["day"] != now.date().isoformat():
-        budget.update(day=now.date().isoformat(), calls=0)
+    if "games" in cache:                       # old API-Football cache: start fresh
+        cache = {}
+    recent = cache.get("recent", {})           # ESPN results newer than the dataset
 
-    api = team_news.Client(key, budget, limit=0)
-    acct = api.status()                        # free call: how many calls are left today
-    if not acct.get("ok"):
-        print("API-Football:", acct.get("error"))
+    # ---- history: the open results dataset
+    text = get(RESULTS_CSV, raw=True)
+    if not text:
+        print("Results dataset unavailable; skipping internationals this run.")
         return
-    left = (acct.get("dailyLimit") or 100) - (acct.get("callsToday") or 0) - RESERVE
-    api.limit = budget["calls"] + max(0, min(MAX_CALLS, left))
-    try:
-        update_cache(api, cache, now)
-    except (team_news.OutOfCalls, RuntimeError, OSError) as e:
-        print("International results:", e)
+    games, logos, latest = [], cache.get("logos", {}), ""
+    for r in csv.DictReader(io.StringIO(text)):
+        if r["date"] < cutoff or not r["home_score"].isdigit() or not r["away_score"].isdigit():
+            continue
+        latest = max(latest, r["date"])
+        games.append({"home": r["home_team"], "away": r["away_team"],
+                      "ft": (int(r["home_score"]), int(r["away_score"])),
+                      "date": predict.parse_time(r["date"] + "T18:00:00Z"),
+                      "key": f"{r['date']}|{r['home_team']}|{r['away_team']}"})
+
+    # ---- ESPN: results since the dataset's last game, and the next 14 days
+    start = max(predict.parse_time((latest or now.date().isoformat()) + "T00:00:00Z"), now - timedelta(days=60))
+    days = [start + timedelta(days=i) for i in range((now - start).days + DAYS_AHEAD + 1)]
+    # every few days check all competitions; in between only the ones with games
+    check_all = not cache.get("slugsAt") or now - predict.parse_time(cache["slugsAt"]) > timedelta(days=3)
+    slugs = list(SLUGS) if check_all else cache.get("activeSlugs") or list(SLUGS)
+    upcoming, seen = [], set()
+    jobs = [(slug, day) for slug in slugs for day in days]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda j: (j[0], espn_day(*j)), jobs))
+    for slug, events in results:
+        for e in events:
+            if True:
+                ev = parse_event(slug, e)
+                if not ev:
+                    continue
+                seen.add(slug)
+                for s in ("home", "away"):
+                    if ev[s]["logo"]:
+                        logos[ev[s]["name"]] = ev[s]["logo"]
+                if ev["completed"] and None not in ev["ft"]:
+                    recent[ev["espn"]] = ev
+                elif ev["state"] == "pre":
+                    upcoming.append(ev)
+    if check_all:
+        cache["activeSlugs"], cache["slugsAt"] = sorted(seen), now.isoformat()
+    have = {g["key"] for g in games}
+    for ev in recent.values():
+        d = ev["date"][:10]
+        if d >= cutoff and f"{d}|{ev['home']['name']}|{ev['away']['name']}" not in have:
+            games.append({"home": ev["home"]["name"], "away": ev["away"]["name"], "ft": tuple(ev["ft"]),
+                          "date": predict.parse_time(ev["date"]), "key": ev["espn"]})
+    cache["recent"] = {k: v for k, v in recent.items() if v["date"][:10] >= (latest or "0")
+                       or now - predict.parse_time(v["date"]) < timedelta(days=10)}
+    cache["logos"] = logos
     with open(CACHE_PATH, "w") as f:
         json.dump(cache, f, separators=(",", ":"))
 
-    # ---- rate national teams
-    games, teams_info = [], {}
-    for g in cache["games"].values():
-        for side in ("home", "away"):
-            teams_info[g[side]["id"]] = {"name": g[side]["name"], "crest": g[side]["logo"]}
-        if g["status"] in FINISHED and g["ft"]:
-            games.append({"id": g["id"], "home": g["home"]["id"], "away": g["away"]["id"],
-                          "ft": tuple(g["ft"]), "ht": tuple(g["ht"]) if g["ht"] else None,
-                          "date": predict.parse_time(g["date"]), "comp": g["league"]})
+    # ---- rate national teams (no half-time scores in the dataset, so halves use averages)
     games.sort(key=lambda g: g["date"])
-    if len(games) < 50:
-        print(f"Only {len(games)} international results so far; predictions start once there are more.")
-        return
+    for g in games:
+        g["ht"] = None
+    teams = {g["home"] for g in games} | {g["away"] for g in games}
+    teams |= {ev[s]["name"] for ev in upcoming for s in ("home", "away")}
     predict.HALF_LIFE_DAYS = HALF_LIFE_DAYS
-    teams = set(teams_info)
     centre = {t: (1.0, 1.0) for t in teams}
     models = predict.fit_all(games, teams, centre, now, iters=80)
 
     by_team, pairs = defaultdict(list), defaultdict(list)
     for g in games:
-        by_team[g["home"]].append(g); by_team[g["away"]].append(g)
+        by_team[g["home"]].append(g)
+        by_team[g["away"]].append(g)
         pairs[frozenset((g["home"], g["away"]))].append(g)
     form = lambda t: [predict.result_letter(g, t) for g in by_team[t][-5:]][::-1]
 
-    # ---- predictions for the next 14 days
     preds = predict.load_json(os.path.join(OUT_DIR, "predictions.json"), {"matches": [], "leagues": {}})
     history = predict.load_json(os.path.join(OUT_DIR, "history.json"), {"matches": {}})
     preds["matches"] = [m for m in preds.get("matches", []) if m.get("league") != "INT"]
     added = 0
-    for g in cache["games"].values():
-        when = predict.parse_time(g["date"])
-        if g["status"] not in ("NS", "TBD") or not (now < when <= now + timedelta(days=DAYS_AHEAD)):
+    for ev in upcoming:
+        when = predict.parse_time(ev["date"])
+        if not (now < when <= now + timedelta(days=DAYS_AHEAD)):
             continue
-        hid, aid = g["home"]["id"], g["away"]["id"]
-        p = predict.predict(hid, aid, models, None)
-        h2h = sorted(pairs[frozenset((hid, aid))], key=lambda x: x["date"], reverse=True)[:5]
-        mid = ID_OFFSET + g["id"]
-        date = iso(when)
+        h, a = ev["home"]["name"], ev["away"]["name"]
+        p = predict.predict(h, a, models, None)
+        h2h = sorted(pairs[frozenset((h, a))], key=lambda x: x["date"], reverse=True)[:5]
+        mid = ID_OFFSET + int(ev["espn"])
         p.update({
-            "id": mid, "league": "INT", "compName": COMPS.get(g["league"], "International"),
-            "af": g["id"], "afLeague": g["league"], "season": g["season"], "homeAf": hid, "awayAf": aid,
-            "date": date, "matchday": None,
-            "home": {"name": g["home"]["name"], "crest": g["home"]["logo"], "form": form(hid)},
-            "away": {"name": g["away"]["name"], "crest": g["away"]["logo"], "form": form(aid)},
-            "h2h": [{"date": x["date"].date().isoformat(), "league": "INT",
-                     "home": teams_info[x["home"]]["name"], "away": teams_info[x["away"]]["name"],
+            "id": mid, "league": "INT", "compName": ev["comp"], "espn": ev["espn"], "espnSlug": ev["slug"],
+            "neutral": ev["neutral"], "date": ev["date"], "matchday": None,
+            "home": {"name": h, "crest": ev["home"]["logo"] or logos.get(h), "form": form(h)},
+            "away": {"name": a, "crest": ev["away"]["logo"] or logos.get(a), "form": form(a)},
+            "h2h": [{"date": x["date"].date().isoformat(), "league": "INT", "home": x["home"], "away": x["away"],
                      "score": list(x["ft"])} for x in h2h],
         })
+        if ev["odds"]:
+            p["odds"] = ev["odds"]
         preds["matches"].append(p)
-        history["matches"][str(mid)] = predict.record("INT", date, g["home"]["name"], g["away"]["name"], p)
+        history["matches"][str(mid)] = predict.record("INT", ev["date"], h, a, p)
         added += 1
     preds["matches"].sort(key=lambda m: m["date"])
     preds.setdefault("leagues", {})["INT"] = {"name": "Internationals", "emblem": None}
@@ -202,21 +234,19 @@ def main():
     for k, rec in list(history["matches"].items()):
         if rec.get("league") != "INT" or rec.get("result") is not None:
             continue
-        g = cache["games"].get(str(int(k) - ID_OFFSET))
-        if not g:
-            continue
-        if g["status"] in FINISHED and g["ft"]:
-            rec["result"] = {"ft": g["ft"], "ht": g["ht"] or [None, None], "corners": None}
+        ev = recent.get(str(int(k) - ID_OFFSET))
+        if ev and ev["completed"]:
+            rec["result"] = {"ft": ev["ft"], "ht": [None, None], "corners": None}
             graded += 1
-        elif g["status"] in DROPPED:
-            del history["matches"][k]
+        elif predict.parse_time(rec["date"]) < now - timedelta(days=7):
+            del history["matches"][k]          # never played (postponed or cancelled)
 
     with open(os.path.join(OUT_DIR, "predictions.json"), "w") as f:
         json.dump(preds, f, separators=(",", ":"))
     with open(os.path.join(OUT_DIR, "history.json"), "w") as f:
         json.dump(history, f, separators=(",", ":"))
-    print(f"Internationals: {len(games)} results, {len(teams)} teams, {added} upcoming games predicted, "
-          f"{graded} graded. API calls this run: {budget['calls']}.")
+    print(f"Internationals: {len(games)} results ({len(cache['recent'])} recent from ESPN), {len(teams)} teams, "
+          f"{added} upcoming games predicted, {graded} graded.")
 
 
 if __name__ == "__main__":

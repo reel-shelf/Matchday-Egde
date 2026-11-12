@@ -74,6 +74,7 @@ def make_parlay(kind, name, legs, odds, target=None):
 
 
 def lock_today(now, preds, news, odds):
+    odds = {**{str(m["id"]): m["odds"] for m in preds.get("matches", []) if m.get("odds")}, **odds}
     soon = [pl.apply_news(m, news) for m in preds.get("matches", [])
             if now < parse(m["date"]) < now + timedelta(days=15)]
     if len(soon) < 3:
