@@ -156,6 +156,25 @@
   .sizes button { flex: 1; border: 1px solid var(--line); background: var(--card2); color: var(--text);
     border-radius: 8px; padding: 6px; font: inherit; font-size: 13px; cursor: pointer; }
   .sizes button.on { border-color: var(--accent2); color: var(--accent2); }
+  .tiers h3 { margin: 0; font-size: 16px; }
+  .tiers .free { font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #062512; background: var(--accent);
+    border-radius: 999px; padding: 2px 7px; margin-left: 6px; vertical-align: 2px; }
+  .ladder { display: flex; align-items: center; gap: 4px; margin: 10px 0 6px; }
+  .ladder button { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--card2); color: var(--text);
+    border-radius: 10px; padding: 7px 2px; font: inherit; cursor: pointer; text-align: center; }
+  .ladder button b { display: block; font-size: 15px; }
+  .ladder button small { color: var(--muted); font-size: 10px; }
+  .ladder button.on { border-color: var(--accent2); background: rgba(245,197,66,.08); }
+  .ladder button.on b { color: var(--accent2); }
+  .ladder button.na { opacity: .45; }
+  .ladder i { color: var(--muted); font-style: normal; font-size: 12px; flex: none; }
+  .meter { height: 6px; border-radius: 3px; background: var(--card2); overflow: hidden; margin: 2px 0 8px; }
+  .meter div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .tstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 6px; text-align: center; }
+  .tstats div { background: var(--card2); border-radius: 8px; padding: 6px 2px; }
+  .tstats b { display: block; font-size: 17px; }
+  .tstats small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  .leg .new { font-size: 10px; font-weight: 700; color: var(--accent2); margin-left: 6px; }
   .empty { color: var(--muted); text-align: center; padding: 40px 10px; }
   footer { color: var(--muted); font-size: 11px; text-align: center; padding: 10px 16px 30px; max-width: 720px; margin: 0 auto; }
 </style>
@@ -184,7 +203,7 @@
 <script>
 const LEAGUES = { PL: "Premier League", PD: "La Liga", SA: "Serie A", BL1: "Bundesliga", FL1: "Ligue 1", CL: "Champions League" };
 let data = { matches: [], leagues: {}, tables: {}, best: [] }, history = { matches: {} }, backtest = { rows: [] };
-let tab = "up", league = "ALL", bigSize = 6;
+let tab = "up", league = "ALL", bigSize = 6, tier = 10;
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -347,13 +366,83 @@ function parlayCard(title, note, legs, big) {
   </div>`;
 }
 
+// ---------------------------------------------------------------- free parlay tiers
+// A ladder of parlays that climbs 10 -> 20 -> 100 -> 1,000 odds. Each tier keeps every
+// pick from the tier below and adds more, safest straight wins first. The last pick of
+// each tier is chosen (from any market) so the odds land as close above the target as possible.
+const TIERS = [10, 20, 100, 1000], MAX_LEGS = 30;
+function legOptions(m) {
+  const fav = favourite(m), f = m.ft;
+  return [
+    { m, label: `${fav.name} to win`, p: fav.win },
+    { m, label: `${fav.name} or draw`, p: fav.dc },
+    { m, label: "Over 1.5 goals", p: f.over15 },
+    { m, label: "Over 2.5 goals", p: f.over25 },
+    { m, label: "Both teams score", p: f.btts },
+  ].filter(l => l.p > 1 && l.p < 99);
+}
+const legOdds = legs => legs.reduce((x, l) => x * 100 / l.p, 1);
+function buildTiers(games) {
+  const pool = games.map(winLeg).sort((a, b) => b.p - a.p);
+  const used = new Set(), legs = [], out = [];
+  for (const target of TIERS) {
+    const start = legs.length;
+    while (legs.length < MAX_LEGS) {
+      const odds = legOdds(legs);
+      if (odds >= target) break;
+      // Can one more pick finish this tier? Take the one landing closest above the target.
+      let finish = null;
+      for (const m of games) {
+        if (used.has(m.id)) continue;
+        for (const l of legOptions(m)) {
+          const o = odds * 100 / l.p;
+          if (o >= target && o <= target * 1.25 && (!finish || o < finish.o)) finish = { l, o };
+        }
+      }
+      const next = finish ? finish.l : pool.find(l => !used.has(l.m.id));
+      if (!next) break;
+      used.add(next.m.id); legs.push(next);
+    }
+    const odds = legOdds(legs);
+    out.push({ target, legs: legs.slice(), added: legs.length - start, odds, ok: odds >= target });
+  }
+  return out;
+}
+function tierCard(games) {
+  const tiers = buildTiers(games);
+  const t = tiers.find(x => x.target === tier) || tiers[0];
+  const fmt = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2);
+  const pos = Math.log10(Math.max(t.odds, 1)) / 3 * 100;
+  const prev = TIERS.indexOf(t.target) > 0 ? tiers[TIERS.indexOf(t.target) - 1] : null;
+  const fresh = prev ? prev.legs.length : 0;
+  return `<div class="card tiers">
+    <h3>Parlay tiers<span class="free">FREE</span></h3>
+    <div class="note" style="margin:2px 0 0">Climb the ladder: every tier keeps the picks below it and adds more.</div>
+    <div class="ladder">${tiers.map((x, i) => `${i ? "<i>›</i>" : ""}<button data-tier="${x.target}"
+      class="${x.target === t.target ? "on" : ""}${x.ok ? "" : " na"}"><b>${x.target.toLocaleString()}</b>
+      <small>${x.legs.length} picks</small></button>`).join("")}</div>
+    <div class="meter"><div style="width:${Math.min(100, pos).toFixed(1)}%"></div></div>
+    <div class="tstats">
+      <div><b>${fmt(t.odds)}</b><small>Fair odds</small></div>
+      <div><b>${t.legs.length}</b><small>Picks</small></div>
+      <div><b>${(100 / t.odds).toFixed(t.odds >= 100 ? 2 : 1)}%</b><small>Chance</small></div>
+    </div>
+    ${t.ok ? "" : `<div class="note">Not enough upcoming games to reach ${t.target.toLocaleString()} odds yet. This is as high as it goes.</div>`}
+    ${t.legs.map((l, i) => `<div class="leg" data-go="${l.m.id}"><div class="t"><div>${esc(l.label)}${i >= fresh && prev ? `<span class="new">NEW</span>` : ""}</div>
+      <div>${esc(l.m.home.name)} v ${esc(l.m.away.name)} · ${esc(new Date(l.m.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }))}</div></div>
+      <b>${l.p}%</b></div>`).join("")}
+    <div class="note" style="margin:6px 0 0">Only worth betting if a bookmaker pays more than ${fmt(t.odds)} for this parlay.</div>
+  </div>`;
+}
+
 function renderParlay() {
   const soon = data.matches.filter(m => inLeague(m.league) && new Date(m.date) > Date.now()
     && new Date(m.date) - Date.now() < 15 * 86400000);
   if (soon.length < 3) return `<div class="empty">Not enough upcoming games in the next 2 weeks to build a parlay yet.</div>`;
   const safe = soon.map(safeLeg).sort((a, b) => b.p - a.p).slice(0, 3);
   const wins = soon.map(winLeg).sort((a, b) => b.p - a.p).slice(0, Math.min(bigSize, soon.length));
-  return parlayCard("Short parlay", "3 safest picks: the easier one to win", safe, false)
+  return tierCard(soon)
+    + parlayCard("Short parlay", "3 safest picks: the easier one to win", safe, false)
     + parlayCard("Big parlay", "Straight wins only: bigger payout, harder to win", wins, true)
     + `<div class="note">Picks come from games in the next 2 weeks, one pick per game. Picks are combined as separate games, so the chance all win is each chance multiplied together. For entertainment only. If you bet, bet responsibly and only if you are of legal age.</div>`;
 }
@@ -479,6 +568,8 @@ document.getElementById("view").onclick = e => {
   if (lg) { league = lg.dataset.l; render(); return; }
   const size = e.target.closest("[data-size]");
   if (size) { bigSize = +size.dataset.size; render(); return; }
+  const tb = e.target.closest("[data-tier]");
+  if (tb) { tier = +tb.dataset.tier; render(); return; }
   const go = e.target.closest("[data-go]");
   if (go) {
     if (tab !== "up") { tab = "up"; render(); }
