@@ -200,6 +200,12 @@
   .add { border: 1px solid var(--line); background: var(--card2); color: var(--accent); border-radius: 7px;
     width: 28px; height: 26px; font: inherit; font-weight: 800; cursor: pointer; }
   .add.on { background: var(--accent); color: #062512; border-color: var(--accent); }
+  .qadd { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .qadd > span { color: var(--muted); font-size: 12px; flex-basis: 100%; }
+  .qadd button { flex: 1; min-width: 0; border: 1px solid rgba(47,210,122,.45); background: rgba(47,210,122,.08);
+    color: var(--accent); border-radius: 9px; padding: 7px 6px; font: inherit; font-size: 12px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qadd button.on { background: var(--accent); color: #062512; border-color: var(--accent); }
   .favs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
   .favs button { border: 1px solid var(--line); background: var(--card2); color: var(--text); border-radius: 999px;
     padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
@@ -496,6 +502,7 @@ function card(m) {
     <div class="probs"><span class="h">Home ${f.home}%</span><span class="d">Draw ${f.draw}%</span><span class="a">Away ${f.away}%</span></div>
     <div class="pick"><span class="badge">Pick: ${esc(pickText(f.pick, H, A))} <em>${f.pickPct}%</em></span>
       <span class="conf ${f.confidence}">${f.confidence}</span></div>
+    ${quickAdd(m)}
     ${valueLine(m)}
     ${newsBlock(m)}
     <div class="more">
@@ -522,10 +529,18 @@ function card(m) {
       ${h2h}
       <div class="favs">${[H, A].map(t => `<button data-fav="${esc(t)}" class="${isFav(t) ? "on" : ""}">${isFav(t) ? "★ Following" : "☆ Follow"} ${esc(t)}</button>`).join("")}</div>
     </div>
-    <div class="hint">Tap for odds, build your parlay, goals, halves, corners & head to head</div>
+    <div class="hint">Tap for more picks to add (goals, double chance…), odds, halves, corners & head to head</div>
   </div>`;
 }
 
+// Add-to-parlay buttons on the card face: home win, draw, away win.
+function quickAdd(m) {
+  const b = (k, text) => {
+    const on = slip.some(s => s.id === m.id && s.k === k);
+    return `<button data-add="${m.id}:${k}" class="${on ? "on" : ""}">${on ? "✓" : "+"} ${esc(text)}</button>`;
+  };
+  return `<div class="qadd"><span>Add to my parlay:</span>${b("1", m.home.name)}${b("X", "Draw")}${b("2", m.away.name)}</div>`;
+}
 // Best value on this game's card face.
 function valueLine(m) {
   let best = null;
@@ -710,7 +725,7 @@ function slipLegs() {
 function slipCard() {
   const legs = slipLegs();
   if (!legs.length) return `<div class="card slip"><h3>My parlay</h3>
-    <div class="note" style="margin:4px 0 0">Build your own: open any match on the Predictions tab and tap <b>+</b> next to a pick. One pick per game.</div></div>`;
+    <div class="note" style="margin:4px 0 0">Build your own: on the Predictions tab, tap <b>+ Add to my parlay</b> on any match (tap the match for more picks like goals or double chance). One pick per game.</div></div>`;
   const chance = legs.reduce((x, l) => x * l.p / 100, 1);
   return `<div class="card parlay slip">
     <div class="head"><div><h3>My parlay</h3><div class="note" style="margin:2px 0 0">${legs.length} pick${legs.length > 1 ? "s" : ""} you chose</div></div>
