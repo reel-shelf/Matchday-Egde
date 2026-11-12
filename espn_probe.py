@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""One-off check of what ESPN's free (unofficial) soccer feed covers. Prints a summary."""
+"""One-off check of ESPN's free soccer feed for internationals, plus the open international results dataset."""
+import csv
+import gzip
+import io
 import json
 import time
 import urllib.error
@@ -8,85 +11,86 @@ from datetime import datetime, timedelta, timezone
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 SLUGS = ["uefa.nations", "fifa.friendly", "fifa.worldq.uefa", "fifa.worldq.conmebol", "fifa.worldq.caf",
-         "fifa.worldq.afc", "fifa.worldq.concacaf", "uefa.euroq", "concacaf.nations.league", "eng.1", "ned.1"]
+         "fifa.worldq.afc", "fifa.worldq.concacaf", "uefa.euroq", "concacaf.nations.league"]
+RESULTS = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
 
 
-def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+def get(url, raw=False):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept-Encoding": "gzip"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r)
+            body = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                body = gzip.decompress(body)
+            return body.decode() if raw else json.loads(body)
     except urllib.error.HTTPError as e:
-        return {"_error": f"{e.code}: {e.read()[:300]!r}"}
-    except Exception as e:  # noqa: BLE001 - this is a probe
+        body = e.read()
+        try:
+            body = gzip.decompress(body)
+        except OSError:
+            pass
+        return {"_error": f"{e.code}: {body[:200]!r}"}
+    except Exception as e:  # noqa: BLE001
         return {"_error": str(e)}
 
 
-# Which request formats work at all?
-_now = datetime.now(timezone.utc)
-for url in [f"{BASE}/eng.1/scoreboard",
-            f"{BASE}/eng.1/scoreboard?dates={_now.strftime('%Y%m%d')}",
-            f"{BASE}/eng.1/scoreboard?dates={_now.strftime('%Y%m%d')}-{(_now + timedelta(days=14)).strftime('%Y%m%d')}",
-            f"{BASE}/eng.1/scoreboard?dates=20240101-20240131&limit=100",
-            f"{BASE}/uefa.nations/scoreboard",
-            f"{BASE}/fifa.friendly/scoreboard",
-            "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard",
-            "https://site.web.api.espn.com/apis/site/v2/sports/soccer/uefa.nations/scoreboard",
-            "https://site.api.espn.com/apis/v2/sports/soccer/eng.1/standings"]:
-    d = get(url)
-    print("FORMAT", url.split("soccer/")[-1], "->", d.get("_error") or f"OK, {len(d.get('events') or [])} events, keys {sorted(d)[:8]}")
-
-
-def keys(d, depth=0):
-    return sorted(d.keys()) if isinstance(d, dict) else type(d).__name__
-
-
 now = datetime.now(timezone.utc)
-fmt = lambda d: d.strftime("%Y%m%d")
-out = {}
+espn_teams, upcoming, finished = set(), [], []
 for slug in SLUGS:
-    res = {}
-    up = get(f"{BASE}/{slug}/scoreboard?dates={fmt(now - timedelta(days=2))}-{fmt(now + timedelta(days=14))}&limit=500")
-    if "_error" in up:
-        res["error"] = up["_error"]; out[slug] = res; continue
-    evs = up.get("events") or []
-    res["events_next14d"] = len(evs)
-    res["statuses"] = sorted({e["status"]["type"]["name"] for e in evs})
-    if evs:
-        e = evs[0]
-        c = e["competitions"][0]
-        res["sample"] = {"id": e["id"], "date": e["date"], "name": e.get("name"),
-                         "competitor_keys": keys(c["competitors"][0]), "team_keys": keys(c["competitors"][0].get("team")),
-                         "has_odds": bool(c.get("odds")), "odds": c.get("odds", [None])[0] if c.get("odds") else None,
-                         "neutral": c.get("neutralSite"), "score": [x.get("score") for x in c["competitors"]]}
-        # one finished and one upcoming summary
-        for label, ev in (("finished", next((x for x in evs if x["status"]["type"]["completed"]), None)),
-                          ("upcoming", next((x for x in evs if x["status"]["type"]["state"] == "pre"), None))):
-            if not ev:
-                continue
-            sm = get(f"{BASE}/{slug}/summary?event={ev['id']}")
-            info = {"keys": keys(sm)}
-            ros = sm.get("rosters") or []
-            if ros:
-                r0 = ros[0]
-                info["roster_keys"] = keys(r0)
-                pl = r0.get("roster") or []
-                info["roster_size"] = len(pl)
-                info["starters"] = sum(1 for p in pl if p.get("starter"))
-                info["player_sample"] = {k: pl[0].get(k) for k in ("starter", "jersey", "position", "subbedIn")} if pl else None
-                info["player_name"] = (pl[0].get("athlete") or {}).get("displayName") if pl else None
-            for k in ("injuries", "odds", "pickcenter", "headToHeadGames", "keyEvents"):
-                if k in sm:
-                    v = sm[k]
-                    info[k] = (len(v) if isinstance(v, list) else keys(v))
-            if sm.get("pickcenter"):
-                info["pickcenter_sample"] = sm["pickcenter"][0]
-            if sm.get("injuries"):
-                info["injuries_sample"] = sm["injuries"][0] if isinstance(sm["injuries"], list) else None
-            res[label] = info
-    # history: one year in one call?
-    hist = get(f"{BASE}/{slug}/scoreboard?dates=20240101-20241231&limit=1000")
-    res["events_2024"] = len(hist.get("events") or []) if "_error" not in hist else hist["_error"]
-    out[slug] = res
-    time.sleep(1)
-print(json.dumps(out, indent=1, default=str)[:60000])
+    count = 0
+    for d in range(-3, 15):
+        day = (now + timedelta(days=d)).strftime("%Y%m%d")
+        sb = get(f"{BASE}/{slug}/scoreboard?dates={day}")
+        for e in sb.get("events") or []:
+            count += 1
+            c = e["competitions"][0]
+            names = [x["team"]["displayName"] for x in c["competitors"]]
+            espn_teams.update(names)
+            st = e["status"]["type"]
+            (finished if st["completed"] else upcoming).append((slug, e["id"], e["date"], names, bool(c.get("odds"))))
+        time.sleep(0.2)
+    print(f"{slug}: {count} games from 3 days ago to 14 days ahead")
+print(f"\nupcoming: {len(upcoming)}, finished: {len(finished)}, with odds on scoreboard: {sum(1 for u in upcoming if u[4])}")
+for u in upcoming[:6]:
+    print("  ", u)
+if upcoming:
+    c0 = get(f"{BASE}/{upcoming[0][0]}/scoreboard?dates={upcoming[0][2][:10].replace('-', '')}")
+    ev = next(e for e in c0["events"] if e["id"] == upcoming[0][1])
+    comp = ev["competitions"][0]
+    print("\nscoreboard competition keys:", sorted(comp))
+    print("competitor keys:", sorted(comp["competitors"][0]), "| homeAway:", comp["competitors"][0].get("homeAway"),
+          "| neutralSite:", comp.get("neutralSite"))
+    if comp.get("odds"):
+        print("odds sample:", json.dumps(comp["odds"][0])[:600])
+for label, lst in (("UPCOMING", upcoming), ("FINISHED", finished)):
+    if not lst:
+        continue
+    slug, eid = lst[0][0], lst[0][1]
+    sm = get(f"{BASE}/{slug}/summary?event={eid}")
+    print(f"\n{label} summary keys:", sorted(sm) if isinstance(sm, dict) else sm)
+    for r in sm.get("rosters") or []:
+        pl = r.get("roster") or []
+        print(f"  roster {r.get('team', {}).get('displayName')}: {len(pl)} players, {sum(1 for p in pl if p.get('starter'))} starters,"
+              f" sample {[(p.get('athlete') or {}).get('displayName') for p in pl[:3]]}")
+    for k in ("pickcenter", "odds", "injuries", "gameInfo", "keyEvents"):
+        if sm.get(k):
+            print(f"  {k}:", json.dumps(sm[k])[:500])
+    # lineups for finished games come from rosters; check a few more finished games for rosters
+if finished:
+    have = 0
+    for slug, eid, *_ in finished[:8]:
+        sm = get(f"{BASE}/{slug}/summary?event={eid}")
+        have += any(any(p.get("starter") for p in (r.get("roster") or [])) for r in sm.get("rosters") or [])
+    print(f"\nfinished games with starting lineups: {have}/{min(8, len(finished))}")
+
+csv_text = get(RESULTS, raw=True)
+if isinstance(csv_text, dict):
+    print("\nresults dataset:", csv_text)
+else:
+    rows = list(csv.DictReader(io.StringIO(csv_text)))
+    print(f"\nresults dataset: {len(rows)} games, columns {list(rows[0])}, latest {rows[-1]}")
+    recent = [r for r in rows if r["date"] >= "2023-01-01"]
+    names = {r["home_team"] for r in recent} | {r["away_team"] for r in recent}
+    print(f"since 2023: {len(recent)} games, {len(names)} teams")
+    missing = sorted(t for t in espn_teams if t not in names)
+    print(f"ESPN team names not in the dataset ({len(missing)} of {len(espn_teams)}):", missing)
