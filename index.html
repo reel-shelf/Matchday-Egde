@@ -191,7 +191,8 @@
   .live { color: var(--bad); font-weight: 800; }
   .live::before { content: "● "; }
   .ftsc { color: var(--text); font-weight: 700; }
-  .vrow { margin-top: 8px; font-size: 12px; color: var(--accent2); }
+  .vrow { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .vrow b { color: var(--text); }
   .vb { display: inline-block; font-size: 10px; font-weight: 800; color: #2a1f00; background: var(--accent2);
     border-radius: 6px; padding: 1px 5px; margin-left: 4px; vertical-align: 1px; }
   table.mk { font-size: 13px; }
@@ -377,7 +378,7 @@ function oddsSummary(legs, fair) {
   return `<div class="odds"><span>Fair odds</span><b>${fmtOdds(fair)}</b></div>
     <div class="odds" style="border-top:0;margin-top:0;padding-top:2px"><span>${books(legs)} pays</span><b>${fmtOdds(bk)}</b></div>
     <div class="note" style="margin:6px 0 0;${v >= VALUE_MIN ? "color:var(--accent2)" : ""}">${v >= VALUE_MIN
-      ? `💰 Value: ${books(legs)} pays ${pctv(v)} more than the fair price.`
+      ? `Value: ${books(legs)} pays ${pctv(v)} more than the fair price.`
       : `No value: ${books(legs)} pays ${v < 0 ? `${pctv(-v).slice(1)} less than` : "about the same as"} the fair price.`}</div>`;
 }
 function liveTag(m) {
@@ -570,14 +571,10 @@ function quickAdd(m) {
   };
   return `<div class="qadd"><span>Add to my parlay:</span>${b("1", m.home.name)}${b("X", "Draw")}${b("2", m.away.name)}</div>`;
 }
-// Best value on this game's card face.
+// The bookmaker's odds for this game on the card face: home, draw, away.
 function valueLine(m) {
-  let best = null;
-  for (const k of MARKETS) {
-    const p = mprob(m.ft, k), o = bookOf(m, k), v = valueOf(p, o);
-    if (p >= 35 && v >= VALUE_MIN && (!best || v > best.v)) best = { k, p, o, v };
-  }
-  return best ? `<div class="vrow">💰 Value: ${esc(mlabel(m, best.k))} at ${best.o.toFixed(2)} (our chance ${best.p}%, ${pctv(best.v)})</div>` : "";
+  const o = [["1", m.home.name], ["X", "Draw"], ["2", m.away.name]].map(([k, n]) => [n, bookOf(m, k)]).filter(x => x[1]);
+  return o.length ? `<div class="vrow">Odds (${esc(bookName(m))}): ${o.map(([n, v]) => `${esc(n)} <b>${v.toFixed(2)}</b>`).join(" · ")}</div>` : "";
 }
 // Every market: our chance, fair odds, Bet365 odds, value, and a button to add it to My parlay.
 function marketsTable(m) {
@@ -609,7 +606,7 @@ function valueBox(list) {
   const seen = new Set(), top = picks.filter(x => !seen.has(x.m.id) && seen.add(x.m.id)).slice(0, 6);
   if (!top.length) return "";
   return `<div class="best" style="border-color:rgba(245,197,66,.4);background:linear-gradient(180deg,rgba(245,197,66,.10),rgba(245,197,66,.02))">
-    <h3 style="color:var(--accent2)">💰 Value bets</h3>
+    <h3 style="color:var(--accent2)">★ Value bets</h3>
     <div class="note" style="margin:0 0 4px">The bookmaker pays more than our chances say it should.</div>` + top.map(x =>
     `<div class="bp" data-go="${x.m.id}"><div class="t"><div>${esc(mlabel(x.m, x.k))} · ${x.o.toFixed(2)}</div>
       <div>${esc(x.m.home.name)} v ${esc(x.m.away.name)} · our chance ${x.p}%</div></div>
