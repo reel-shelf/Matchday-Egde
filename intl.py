@@ -87,17 +87,24 @@ def american_to_decimal(ml):
 
 
 def espn_odds(comp):
-    """Bookmaker odds from ESPN's scoreboard, in decimal, keyed by the app's markets."""
+    """Bookmaker odds from ESPN's scoreboard, in decimal, keyed by the app's markets.
+    Layout: moneyline.{home,away,draw}.close.odds and total.over.close.{line,odds} (American odds)."""
     o = (comp.get("odds") or [None])[0]
     if not o:
         return None
-    ml = lambda side: american_to_decimal((o.get(side) or {}).get("moneyLine"))
+    price = lambda node: american_to_decimal(((node or {}).get("close") or (node or {}).get("open") or {}).get("odds"))
+    ml = o.get("moneyline") or {}
     out = {"book": (o.get("provider") or {}).get("name") or "Bookmaker",
-           "1": ml("homeTeamOdds"), "2": ml("awayTeamOdds"), "X": ml("drawOdds")}
-    line = o.get("overUnder")
-    over = american_to_decimal(o.get("overOdds"))
-    if over and line in (1.5, 2.5, 3.5):
-        out[{1.5: "O15", 2.5: "O25", 3.5: "O35"}[line]] = over
+           "1": price(ml.get("home")) or american_to_decimal((o.get("homeTeamOdds") or {}).get("moneyLine")),
+           "2": price(ml.get("away")) or american_to_decimal((o.get("awayTeamOdds") or {}).get("moneyLine")),
+           "X": price(ml.get("draw")) or american_to_decimal((o.get("drawOdds") or {}).get("moneyLine"))}
+    over = (o.get("total") or {}).get("over") or {}
+    line = str(((over.get("close") or over.get("open") or {}).get("line")) or "").lstrip("o")
+    key = {"1.5": "O15", "2.5": "O25", "3.5": "O35"}.get(line)
+    if key:
+        out[key] = price(over)
+    elif o.get("overUnder") in (1.5, 2.5, 3.5):
+        out[{1.5: "O15", 2.5: "O25", 3.5: "O35"}[o["overUnder"]]] = american_to_decimal(o.get("overOdds"))
     out = {k: v for k, v in out.items() if v}
     return out if len(out) > 1 else None
 
