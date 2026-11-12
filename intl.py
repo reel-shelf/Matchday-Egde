@@ -96,7 +96,14 @@ def update_cache(api, cache, now):
         if api.state["calls"] >= api.limit:
             print("Call budget for this run used; the rest next run.")
             break
-        for f in api.get(f"/fixtures?league={lid}&season={year}"):
+        try:
+            rows = api.get(f"/fixtures?league={lid}&season={year}")
+        except RuntimeError as e:          # e.g. a season the plan doesn't include
+            cache.setdefault("errors", {})[key] = str(e)
+            print(e)
+            continue
+        cache.get("errors", {}).pop(key, None)
+        for f in rows:
             r = fixture_row(f)
             cache["games"][str(r["id"])] = r
         cache["fetched"][key] = iso(now)
