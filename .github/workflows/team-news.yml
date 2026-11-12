@@ -30,6 +30,13 @@ jobs:
           if [ -z "$API_FOOTBALL_KEY$RAPIDAPI_KEY" ]; then
             echo "No API key secret set yet, so there is no team news to fetch."; exit 0
           fi
+          # Check the key works (the status endpoint doesn't use up daily calls). Never prints the key.
+          if [ -n "$API_FOOTBALL_KEY" ]; then
+            curl -sS -m 30 -H "x-apisports-key: $API_FOOTBALL_KEY" https://v3.football.api-sports.io/status
+          else
+            curl -sS -m 30 -H "x-rapidapi-key: $RAPIDAPI_KEY" -H "x-rapidapi-host: api-football-v1.p.rapidapi.com" \
+              https://api-football-v1.p.rapidapi.com/v3/status
+          fi | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('response') or {}; print('API key check:', 'errors: %s' % d['errors'] if d.get('errors') else 'OK, plan %s, %s of %s calls used today' % ((r.get('subscription') or {}).get('plan'), (r.get('requests') or {}).get('current'), (r.get('requests') or {}).get('limit_day')))" || echo "API key check: could not reach API-Football"
           end=$(( $(date +%s) + 340 * 60 ))
           while [ "$(date +%s)" -lt "$end" ]; do
             started=$(date +%s)
