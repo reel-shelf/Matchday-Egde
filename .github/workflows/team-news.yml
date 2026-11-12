@@ -1,0 +1,31 @@
+name: Update team news
+# Injuries, suspensions and lineups from API-Football. Runs every 10 minutes; when a
+# game kicks off soon, the run waits and does a final check 4 minutes before kick-off.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: team-news
+  cancel-in-progress: false
+jobs:
+  news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check team news
+        run: python3 team_news.py
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      - name: Save to the repo
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git add data/team-news.json data/team-news-state.json 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -q -m "Update team news"
+          for i in 1 2 3 4; do git pull --rebase -q && git push -q && exit 0; sleep $((i * 5)); done
+          exit 1

@@ -675,7 +675,7 @@ async function load() {
   if (p) { data = Object.assign(data, p); baseMatches = p.matches || []; }
   if (h) history = h;
   if (b) backtest = b;
-  const n = await get("api/team-news");
+  const n = await get("data/team-news.json");
   if (n && n.matches) news = n;
   applyNews();
   document.getElementById("updated").textContent = p
@@ -687,7 +687,7 @@ load();
 // Check for new team news every minute while the app is open, and when it comes back on screen.
 async function refreshNews() {
   if (document.hidden) return;
-  const n = await fetch("api/team-news?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null);
+  const n = await fetch("data/team-news.json?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null);
   if (!n || !n.matches || n.updated === news.updated) return;
   const changed = JSON.stringify(n.matches) !== JSON.stringify(news.matches);
   news = n;
