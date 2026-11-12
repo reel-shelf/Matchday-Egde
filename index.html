@@ -239,6 +239,10 @@
   .sheet h3 { margin: 0 0 6px; }
   .sheet ol { padding-left: 20px; margin: 8px 0; font-size: 14px; }
   .sheet code { background: var(--card2); padding: 2px 6px; border-radius: 6px; user-select: all; }
+  @media (max-width: 430px) { .hbtn .lbl { display: none; } .hbtn { padding: 7px 10px; } }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--accent); color: #062512;
+    font-weight: 700; font-size: 14px; padding: 10px 16px; border-radius: 999px; z-index: 20; }
+  .sharebtn { margin-top: 10px; width: 100%; }
   .empty { color: var(--muted); text-align: center; padding: 40px 10px; }
   footer { color: var(--muted); font-size: 11px; text-align: center; padding: 10px 16px 30px; max-width: 720px; margin: 0 auto; }
 </style>
@@ -249,7 +253,7 @@
     <h1>Matchday <span>Edge</span></h1>
     <div class="updated" id="updated">Loading…</div>
   </div>
-  <div class="hact"><button class="hbtn" id="alertsBtn">🔔 Alerts</button><button id="install">Install app</button></div>
+  <div class="hact"><button class="hbtn" id="shareApp" aria-label="Share">📤<span class="lbl"> Share</span></button><button class="hbtn" id="alertsBtn" aria-label="Alerts">🔔<span class="lbl"> Alerts</span></button><button id="install">Install app</button></div>
 </header>
 <div class="ios" id="ios">To install on iPhone: tap <b>Share</b>, then <b>Add to Home Screen</b>.</div>
 <main>
@@ -336,6 +340,28 @@ function legRow(l, extra = "", del = "") {
   return `<div class="leg" data-go="${l.m.id}"><div class="t"><div>${esc(l.label)}${extra}${newsTag(l.m)}${v >= VALUE_MIN ? `<span class="vb">VALUE</span>` : ""}</div>
     <div>${esc(l.m.home.name)} v ${esc(l.m.away.name)} · ${esc(shortDate(l.m.date))}</div></div>
     <div class="lr">${legStatus(l)}<b>${l.p}%</b>${bk ? `<small>${esc(bookName(l.m))} ${bk.toFixed(2)}</small>` : ""}</div>${del}</div>`;
+}
+// ---------------------------------------------------------------- sharing
+const APP_URL = location.origin + location.pathname;
+const shareTexts = {};
+function shareBtn(key, title, legs, fair) {
+  const bk = bookTotal(legs);
+  shareTexts[key] = `${title} (Matchday Edge)\n` + legs.map(l =>
+    `• ${l.label}: ${l.m.home.name} v ${l.m.away.name}, ${shortDate(l.m.date)} (${l.p}%)`).join("\n")
+    + `\nChance all win: ${(100 / fair).toFixed(fair >= 100 ? 2 : 1)}% · fair odds ${fmtOdds(fair)}`
+    + (bk ? ` · ${books(legs)} ${fmtOdds(bk)}` : "") + `\n${APP_URL}`;
+  return `<button class="btn ghost sharebtn" data-share="${key}">📤 Share this parlay</button>`;
+}
+async function share(text, url) {
+  try {
+    if (navigator.share) { await navigator.share({ title: "Matchday Edge", text, url }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(url && !text.includes(url) ? `${text}\n${url}` : text); toast("Copied: paste it into a message"); }
+  catch (e) { prompt("Copy this:", text); }
+}
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2200);
 }
 const fmtOdds = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2);
 function bookTotal(legs) {
@@ -650,6 +676,7 @@ function parlayCard(title, note, legs, big) {
     ${big ? `<div class="sizes">${[5, 6, 7].map(n => `<button data-size="${n}" class="${n === bigSize ? "on" : ""}">${n} picks</button>`).join("")}</div>` : ""}
     ${legs.map(l => legRow(l)).join("")}
     ${oddsSummary(legs, fair)}
+    ${shareBtn(big ? "big" : "short", title, legs, fair)}
   </div>`;
 }
 
@@ -717,6 +744,7 @@ function tierCard(games) {
     ${t.ok ? "" : `<div class="note">Not enough upcoming games to reach ${t.target.toLocaleString()} odds yet. This is as high as it goes.</div>`}
     ${t.legs.map((l, i) => legRow(l, i >= fresh && prev ? `<span class="new">NEW</span>` : "")).join("")}
     ${oddsSummary(t.legs, t.odds)}
+    ${shareBtn("tier", `${t.target.toLocaleString()} odds parlay`, t.legs, t.odds)}
   </div>`;
 }
 
@@ -735,7 +763,7 @@ function slipCard() {
       <div class="chance"><b>${(chance * 100).toFixed(chance < 0.1 ? 1 : 0)}%</b><small>chance all win</small></div></div>
     ${legs.map(l => legRow(l, "", `<button class="del" data-del="${l.m.id}" aria-label="Remove">×</button>`)).join("")}
     ${oddsSummary(legs, 1 / chance)}
-    <div class="btnrow"><button class="btn ghost" data-clear="1">Clear</button></div>
+    <div class="btnrow"><button class="btn ghost" data-clear="1">Clear</button>${shareBtn("mine", "My parlay", legs, 1 / chance).replace("sharebtn", "").replace(" this parlay", "")}</div>
   </div>`;
 }
 
@@ -934,6 +962,8 @@ document.getElementById("view").onclick = e => {
   if (size) { bigSize = +size.dataset.size; render(); return; }
   const tb = e.target.closest("[data-tier]");
   if (tb) { tier = +tb.dataset.tier; render(); return; }
+  const sh = e.target.closest("[data-share]");
+  if (sh) { share(shareTexts[sh.dataset.share]); return; }
   const add = e.target.closest("[data-add]");
   if (add) {
     const [id, k] = add.dataset.add.split(":"), had = slip.some(s => s.id === +id && s.k === k);
@@ -1003,6 +1033,9 @@ async function refreshLive(first) {
 }
 setInterval(refreshLive, 60000);
 document.addEventListener("visibilitychange", () => refreshLive());
+
+document.getElementById("shareApp").onclick = () => share(
+  "Matchday Edge: free football predictions, parlays and value bets. Open the link, then Install app (or Share → Add to Home Screen on iPhone).", APP_URL);
 
 // ---------------------------------------------------------------- alerts sheet
 const sheet = document.getElementById("sheet");
