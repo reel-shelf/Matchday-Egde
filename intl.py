@@ -92,7 +92,12 @@ def update_cache(api, cache, now):
                 continue
             todo.append((0 if current else 1, -(int(s["year"])), lid, s["year"], key))
     todo.sort()
+    blocked = lambda k: "Free plans do not have access" in cache.get("errors", {}).get(k, "") \
+        and now - predict.parse_time(cache.get("errorsAt", {}).get(k, iso(now))) < timedelta(days=7)
     for _, _, lid, year, key in todo:
+        if blocked(key):
+            continue                         # the plan doesn't include this season; retry weekly
+        time.sleep(7)                        # free plan: at most 10 calls a minute
         if api.state["calls"] >= api.limit:
             print("Call budget for this run used; the rest next run.")
             break
@@ -100,6 +105,7 @@ def update_cache(api, cache, now):
             rows = api.get(f"/fixtures?league={lid}&season={year}")
         except RuntimeError as e:          # e.g. a season the plan doesn't include
             cache.setdefault("errors", {})[key] = str(e)
+            cache.setdefault("errorsAt", {})[key] = iso(now)
             print(e)
             continue
         cache.get("errors", {}).pop(key, None)
