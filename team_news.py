@@ -300,9 +300,24 @@ def main():
 
     api = Client(key or rapid_key, state, limit, rapid=not key)
     acct = state.get("account") or {}
-    if not acct.get("ok") or acct.get("day") != today:   # check the key once a day
-        state["account"] = {**api.status(), "day": today}
+    if acct.get("ok") and acct.get("day") == today:
+        api = Client(key or rapid_key, state, limit, rapid=acct.get("via") == "rapidapi")
+    else:   # check the key once a day (free call)
+        check_result = {**api.status(), "via": "rapidapi" if not key else "api-football"}
+        if not check_result["ok"] and key:
+            # A RapidAPI key saved as API_FOOTBALL_KEY: try it through RapidAPI.
+            rapid = Client(key, state, limit, rapid=True)
+            r = rapid.status()
+            if r["ok"]:
+                api, check_result = rapid, {**r, "via": "rapidapi"}
+            else:
+                check_result["rapidapiError"] = r.get("error")
+        state["account"] = {**check_result, "day": today}
         print("API key check:", state["account"])
+        if not check_result["ok"]:
+            state["lastError"] = "API key not accepted: " + str(check_result.get("error"))
+            save(state, build_news(state, [], now, limit))
+            return
     try:
         check(api, state, matches, now)
     except (OutOfCalls, RuntimeError, urllib.error.URLError, OSError) as e:
