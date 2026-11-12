@@ -1,10 +1,10 @@
-name: Update team news
-# Injuries, suspensions and lineups from API-Football.
-# GitHub often starts scheduled runs late (sometimes only once an hour), so each run
-# stays on for up to 5 hours 40 minutes and checks every 5 minutes itself. The hourly
-# schedule just restarts it when it ends; only one run is active at a time.
-# When a game is close, team_news.py also waits and does a final check 4 minutes
-# before kick-off.
+name: Live updates
+# Every 5 minutes: team news and bookmaker odds (team_news.py), live scores (live.py),
+# parlay and team-news track record (tracker.py) and phone alerts (alerts.py).
+# Results go to the live-data branch (data/ folder), which the app reads directly,
+# so main isn't flooded with commits.
+# GitHub often starts scheduled runs late, so each run stays on for up to 5h40m and
+# loops itself; the hourly schedule restarts it. Only one run is active at a time.
 on:
   schedule:
     - cron: "7 * * * *"
@@ -15,39 +15,43 @@ concurrency:
   group: team-news
   cancel-in-progress: false
 jobs:
-  news:
+  live:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
-      - name: Check team news every 5 minutes
+      - name: Live updates every 5 minutes
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALLTOKEN }}
+          LIVE_DIR: live/data
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@users.noreply.github.com
-          if [ -z "$API_FOOTBALL_KEY$RAPIDAPI_KEY" ]; then
-            echo "No API key secret set yet, so there is no team news to fetch."; exit 0
-          fi
-          # Check the key works (the status endpoint doesn't use up daily calls). Never prints the key.
-          if [ -n "$API_FOOTBALL_KEY" ]; then
-            curl -sS -m 30 -H "x-apisports-key: $API_FOOTBALL_KEY" https://v3.football.api-sports.io/status
+          git config --global user.name github-actions
+          git config --global user.email github-actions@users.noreply.github.com
+          if git fetch -q origin live-data:refs/remotes/origin/live-data; then
+            git worktree add -q -B live-data live origin/live-data
           else
-            curl -sS -m 30 -H "x-rapidapi-key: $RAPIDAPI_KEY" -H "x-rapidapi-host: api-football-v1.p.rapidapi.com" \
-              https://api-football-v1.p.rapidapi.com/v3/status
-          fi | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('response') or {}; print('API key check:', 'errors: %s' % d['errors'] if d.get('errors') else 'OK, plan %s, %s of %s calls used today' % ((r.get('subscription') or {}).get('plan'), (r.get('requests') or {}).get('current'), (r.get('requests') or {}).get('limit_day')))" || echo "API key check: could not reach API-Football"
+            git worktree add -q --orphan -b live-data live
+          fi
+          mkdir -p live/data
           end=$(( $(date +%s) + 340 * 60 ))
           while [ "$(date +%s)" -lt "$end" ]; do
             started=$(date +%s)
-            git pull --rebase -q || true          # pick up new predictions
-            python3 team_news.py || echo "team_news.py failed; trying again next round"
-            git add data/team-news.json data/team-news-state.json 2>/dev/null || true
-            if ! git diff --cached --quiet; then
-              git commit -q -m "Update team news"
-              for i in 1 2 3 4; do git pull --rebase -q && git push -q && break; sleep $((i * 5)); done
-            fi
-            # next round 5 minutes after this one started
+            git pull --rebase -q origin main || true      # new predictions and results
+            python3 team_news.py || echo "team_news.py failed"
+            python3 live.py || echo "live.py failed"
+            python3 tracker.py || echo "tracker.py failed"
+            python3 alerts.py || echo "alerts.py failed"
+            (
+              cd live && git add -A data
+              if ! git diff --cached --quiet; then
+                # one commit, replaced each time, so the branch stays small
+                if git rev-parse -q --verify HEAD >/dev/null; then git commit -q --amend -m "Live data"
+                else git commit -q -m "Live data"; fi
+                git push -q -f origin live-data || echo "push failed"
+              fi
+            )
             wait=$(( 300 - ($(date +%s) - started) ))
             [ "$wait" -gt 0 ] && sleep "$wait"
           done

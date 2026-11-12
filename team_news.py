@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """
-Matchday Edge: team news.
+Matchday Edge: team news and bookmaker odds.
 
 Pulls injuries, suspensions, doubts and confirmed lineups from API-Football
-(api-sports.io) for games in the next 36 hours and saves them to
-data/team-news.json for the app. Run by .github/workflows/team-news.yml every
-10 minutes.
+(api-sports.io) for games in the next 36 hours, and Bet365 odds for games in the
+next 3 days. Saves team-news.json and odds.json in LIVE_DIR (the live-data branch).
+Run every 5 minutes by .github/workflows/team-news.yml.
 
 - Lineups are polled from 75 minutes before kick-off until they appear (clubs
   usually publish them about 60 minutes before).
-- Final check: GitHub's schedule can run late, so when a game kicks off within
-  the next 25 minutes this run waits until 4 minutes before kick-off and then
+- Final check: the run that lands in the last 6 minutes before kick-off
   re-checks the lineup and injuries one last time.
-- Free plan = 100 calls a day. Every call is counted (data/team-news-state.json)
-  and the script stops at API_FOOTBALL_DAILY_LIMIT (default 95). Lineups are
-  checked before anything else.
+- Free plan = 100 calls a day. Every call is counted (team-news-state.json)
+  and the script stops at API_FOOTBALL_DAILY_LIMIT (default 95). Lineups and
+  injuries come first; odds only use calls while 30 or more are left.
 
-Needs one secret: API_FOOTBALL_KEY (free from api-football.com), or RAPIDAPI_KEY
-(the same data through rapidapi.com, free "Basic" plan for API-Football).
+Needs one secret: API_FOOTBALL_KEY (free from api-football.com), or RAPIDAPI_KEY.
 """
 import json
 import os
@@ -32,17 +30,21 @@ from datetime import datetime, timezone
 API = "https://v3.football.api-sports.io"
 RAPID_HOST = "api-football-v1.p.rapidapi.com"
 RAPID_API = f"https://{RAPID_HOST}/v3"
-LEAGUE_IDS = {"PL": 39, "PD": 140, "SA": 135, "BL1": 78, "FL1": 61, "CL": 2}
+LEAGUE_IDS = {"PL": 39, "PD": 140, "SA": 135, "BL1": 78, "FL1": 61, "CL": 2,
+              "ELC": 40, "DED": 88, "PPL": 94}
 MIN = 60
-LOOK_AHEAD = 36 * 3600
+NEWS_AHEAD = 36 * 3600       # team news for games in the next 36 hours
+ODDS_AHEAD = 72 * 3600       # bookmaker odds for games in the next 3 days
+ODDS_RESERVE = 30            # always keep this many calls for lineups and injuries
+BOOKMAKER = 8                # Bet365
 LINEUP_FROM = 75 * MIN       # start polling lineups this long before kick-off
 FINAL_CHECK = 6 * MIN        # a check inside this window is the final check
-FINAL_AT = 4 * MIN           # when waiting for the final check, run it at kick-off - 4 min
-WAIT_UP_TO = 25 * MIN        # wait for a final check at most this long
 KEY_PLAYERS_MAX_AGE = 7 * 86400
-OUT_DIR = os.environ.get("OUT_DIR", "data")
-STATE_PATH = os.path.join(OUT_DIR, "team-news-state.json")
-NEWS_PATH = os.path.join(OUT_DIR, "team-news.json")
+OUT_DIR = os.environ.get("OUT_DIR", "data")            # predictions.json is read from here
+LIVE_DIR = os.environ.get("LIVE_DIR", OUT_DIR)         # team news and odds are written here
+STATE_PATH = os.path.join(LIVE_DIR, "team-news-state.json")
+NEWS_PATH = os.path.join(LIVE_DIR, "team-news.json")
+ODDS_PATH = os.path.join(LIVE_DIR, "odds.json")
 
 
 class OutOfCalls(Exception):
@@ -127,7 +129,7 @@ class Client:
                 "callsToday": (r.get("requests") or {}).get("current"),
                 "dailyLimit": (r.get("requests") or {}).get("limit_day")}
 
-    def get(self, path):
+    def get(self, path, full=False):
         if self.state["calls"] >= self.limit:
             raise OutOfCalls(f"Daily limit of {self.limit} API-Football calls reached")
         self.state["calls"] += 1
@@ -141,7 +143,35 @@ class Client:
         if errs:
             msg = "; ".join(errs.values() if isinstance(errs, dict) else map(str, errs))
             raise RuntimeError(f"API-Football {path}: {msg}")
-        return body.get("response") or []
+        return body if full else (body.get("response") or [])
+
+
+MARKETS = {1: {"Home": "1", "Draw": "X", "Away": "2"},
+           12: {"Home/Draw": "1X", "Home/Away": "12", "Draw/Away": "X2"},
+           5: {"Over 1.5": "O15", "Over 2.5": "O25", "Over 3.5": "O35"},
+           8: {"Yes": "BTTS"}}
+
+
+def parse_odds(item):
+    for b in item.get("bookmakers") or []:
+        out = {"book": b.get("name")}
+        for bet in b.get("bets") or []:
+            names = MARKETS.get(bet.get("id"), {})
+            for v in bet.get("values") or []:
+                k = names.get(str(v.get("value")))
+                try:
+                    if k:
+                        out[k] = round(float(v["odd"]), 2)
+                except (TypeError, ValueError, KeyError):
+                    pass
+        if len(out) > 1:
+            return out
+    return None
+
+
+def season_of(date):
+    d = datetime.fromisoformat(date.replace("Z", "+00:00"))
+    return d.year if d.month >= 7 else d.year - 1
 
 
 def check(api, state, matches, now, final_only=False):
@@ -154,7 +184,7 @@ def check(api, state, matches, now, final_only=False):
     if not final_only:
         for d in sorted({m["date"][:10] for m in matches if str(m["id"]) not in mp}):
             fetched = state["dates"].get(d)
-            if fetched and now - parse(fetched) < 6 * 3600:
+            if fetched and now - parse(fetched) < 8 * 3600:
                 continue
             fixtures = api.get(f"/fixtures?date={d}")
             state["dates"][d] = iso(now)
@@ -190,6 +220,8 @@ def check(api, state, matches, now, final_only=False):
     # 3. Injuries & suspensions: every 4 hours, every 30 min in the last 3 hours, and at the final check.
     due = []
     for m in mapped:
+        if to_kick(m) > NEWS_AHEAD:
+            continue
         t, r = to_kick(m), raw_of(m)
         if t < -2 * MIN:
             continue
@@ -210,7 +242,36 @@ def check(api, state, matches, now, final_only=False):
                                          "reason": x["player"].get("reason") or ""}}
                              for x in res if (x.get("fixture") or {}).get("id") == af(m) and x.get("player")]
 
-    # 4. Key players (top scorers and assisters), one league per run, refreshed weekly.
+    # 4. Bookmaker odds for the next 3 days, refreshed every 12 hours per league and day.
+    #    Problems here (e.g. a plan limit) are saved but don't stop the other checks.
+    if not final_only:
+        pairs = sorted({(m["league"], m["date"][:10]) for m in mapped if 0 < to_kick(m) < ODDS_AHEAD})
+        try:
+            for code, d in pairs:
+                at = state["oddsAt"].get(f"{code}:{d}")
+                if at and now - parse(at) < 12 * 3600:
+                    continue
+                if api.limit - state["calls"] < ODDS_RESERVE:
+                    break
+                season = season_of(d + "T12:00:00Z")
+                page, total = 1, 1
+                while page <= min(total, 3):
+                    body = api.get(f"/odds?league={LEAGUE_IDS[code]}&season={season}&date={d}"
+                                   f"&bookmaker={BOOKMAKER}&page={page}", full=True)
+                    total = int((body.get("paging") or {}).get("total") or 1)
+                    for item in body.get("response") or []:
+                        o = parse_odds(item)
+                        fid = (item.get("fixture") or {}).get("id")
+                        if o and fid:
+                            state["odds"][str(fid)] = {**o, "at": iso(now)}
+                    page += 1
+                state["oddsAt"][f"{code}:{d}"] = iso(now)
+            state["oddsError"] = None
+        except (RuntimeError, urllib.error.URLError, OSError) as e:
+            state["oddsError"] = str(e)
+            print(e)
+
+    # 5. Key players (top scorers and assisters), one league per run, refreshed weekly.
     if not final_only and api.limit - state["calls"] >= 20:
         for code in sorted({m["league"] for m in matches}):
             k = state["key"].get(code)
@@ -232,6 +293,8 @@ def check(api, state, matches, now, final_only=False):
 def build_news(state, matches, now, limit):
     out = {}
     for m in matches:
+        if parse(m["date"]) - now > NEWS_AHEAD:
+            continue
         mp, r = state["map"].get(str(m["id"])), state["raw"].get(str(m["id"]))
         if not mp or not r or ("injuries" not in r and "lineups" not in r):
             continue
@@ -262,7 +325,22 @@ def build_news(state, matches, now, limit):
             "callsToday": state["calls"], "limit": limit, "matches": out}
 
 
-def save(state, news):
+def build_odds(state, matches, now):
+    out = {}
+    for m in matches:
+        mp = state["map"].get(str(m["id"]))
+        o = mp and state["odds"].get(str(mp["af"]))
+        if o:
+            out[str(m["id"])] = o
+    return {"updated": iso(now), "status": state.get("oddsError") or "ok", "matches": out}
+
+
+def save(state, news, odds=None):
+    os.makedirs(LIVE_DIR, exist_ok=True)
+    if odds is not None and load_json(ODDS_PATH, {}).get("matches") != odds["matches"] \
+            or odds is not None and load_json(ODDS_PATH, {}).get("status") != odds["status"]:
+        with open(ODDS_PATH, "w") as f:
+            json.dump(odds, f, separators=(",", ":"))
     # Only write (and so only commit) when an API call was made or the news changed.
     old_state, old_news = load_json(STATE_PATH, None), load_json(NEWS_PATH, {})
     if old_state == state and old_news.get("matches") == news["matches"] and old_news.get("status") == news["status"]:
@@ -284,7 +362,7 @@ def main():
     now = time.time()
     today = iso(now)[:10]
 
-    state = {"day": today, "calls": 0, "dates": {}, "map": {}, "raw": {}, "key": {}}
+    state = {"day": today, "calls": 0, "dates": {}, "map": {}, "raw": {}, "key": {}, "odds": {}, "oddsAt": {}}
     state.update(load_json(STATE_PATH, {}))
     if state["day"] != today:
         state["day"], state["calls"] = today, 0
@@ -292,10 +370,13 @@ def main():
 
     preds = load_json(os.path.join(OUT_DIR, "predictions.json"), {"matches": []})
     matches = [m for m in preds.get("matches", [])
-               if m.get("league") in LEAGUE_IDS and -10 * MIN < parse(m["date"]) - now < LOOK_AHEAD]
+               if m.get("league") in LEAGUE_IDS and -10 * MIN < parse(m["date"]) - now < ODDS_AHEAD]
     keep = {str(m["id"]) for m in matches}
     for k in ("raw", "map"):
         state[k] = {i: v for i, v in state[k].items() if i in keep}
+    live_af = {str(v["af"]) for v in state["map"].values()}
+    state["odds"] = {i: v for i, v in state["odds"].items() if i in live_af}
+    state["oddsAt"] = {k: v for k, v in state["oddsAt"].items() if parse(k.split(":")[1] + "T23:59:59Z") > now}
     state["dates"] = {d: v for d, v in state["dates"].items() if parse(d + "T00:00:00Z") > now - 2 * 86400}
 
     api = Client(key or rapid_key, state, limit, rapid=not key)
@@ -323,23 +404,7 @@ def main():
     except (OutOfCalls, RuntimeError, urllib.error.URLError, OSError) as e:
         state["lastError"] = str(e)
         print(e)
-    save(state, build_news(state, matches, now, limit))
-
-    # Final check: wait for any game kicking off soon that hasn't had one yet.
-    soon = [m for m in matches if str(m["id"]) in state["map"]
-            and not (state["raw"].get(str(m["id"])) or {}).get("finalAt")
-            and FINAL_AT < parse(m["date"]) - now <= WAIT_UP_TO]
-    if soon and not state["lastError"]:
-        at = min(parse(m["date"]) for m in soon) - FINAL_AT
-        print(f"Waiting {round((at - time.time()) / 60)} min for the final check before kick-off...")
-        time.sleep(max(0, at - time.time()))
-        now = time.time()
-        try:
-            check(api, state, matches, now, final_only=True)
-        except (OutOfCalls, RuntimeError, urllib.error.URLError, OSError) as e:
-            state["lastError"] = str(e)
-            print(e)
-        save(state, build_news(state, matches, now, limit))
+    save(state, build_news(state, matches, now, limit), build_odds(state, matches, now))
     print(f"Team news saved. API calls today: {state['calls']}/{limit}.")
 
 

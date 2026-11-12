@@ -3,8 +3,8 @@
 Matchday Edge: football predictions.
 
 1. Downloads fixtures, results and tables from football-data.org (free plan)
-   for the Premier League, La Liga, Serie A, Bundesliga, Ligue 1 and the
-   Champions League.
+   for the Premier League, La Liga, Serie A, Bundesliga, Ligue 1, the
+   Championship, Eredivisie, Primeira Liga and the Champions League.
 2. Rates every team's attack and defence with a Poisson model, counting
    recent games more. All competitions are rated together, so Champions
    League games show how strong the leagues are compared with each other.
@@ -38,12 +38,16 @@ COMPS = {
     "BL1": "Bundesliga",
     "FL1": "Ligue 1",
     "CL": "Champions League",
+    "ELC": "Championship",
+    "DED": "Eredivisie",
+    "PPL": "Primeira Liga",
 }
-DOMESTIC = {"PL", "PD", "SA", "BL1", "FL1"}
+DOMESTIC = {"PL", "PD", "SA", "BL1", "FL1", "ELC", "DED", "PPL"}
 PAST_SEASONS = {"CL": 1}   # how many earlier seasons to download (default 2)
 
 # free corners data (football-data.co.uk spreadsheets, no key needed)
-CORNER_FILES = {"PL": "E0", "PD": "SP1", "SA": "I1", "BL1": "D1", "FL1": "F1"}
+CORNER_FILES = {"PL": "E0", "PD": "SP1", "SA": "I1", "BL1": "D1", "FL1": "F1",
+                "ELC": "E1", "DED": "N1", "PPL": "P1"}
 CORNER_URL = "https://www.football-data.co.uk/mmz4281/{season}/{file}.csv"
 CORNER_LINES = (6.5, 7.5, 8.5, 9.5, 10.5, 11.5)
 

@@ -185,6 +185,54 @@
   .news .shift { margin-top: 6px; color: var(--accent2); }
   .ntag { display: inline-block; font-size: 10px; font-weight: 700; color: var(--accent2); border: 1px solid rgba(245,197,66,.4);
     border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+  .hact { display: flex; gap: 6px; align-items: center; flex: none; }
+  .hbtn { border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-size: 13px;
+    padding: 7px 11px; border-radius: 999px; cursor: pointer; }
+  .live { color: var(--bad); font-weight: 800; }
+  .live::before { content: "● "; }
+  .ftsc { color: var(--text); font-weight: 700; }
+  .vrow { margin-top: 8px; font-size: 12px; color: var(--accent2); }
+  .vb { display: inline-block; font-size: 10px; font-weight: 800; color: #2a1f00; background: var(--accent2);
+    border-radius: 6px; padding: 1px 5px; margin-left: 4px; vertical-align: 1px; }
+  table.mk { font-size: 13px; }
+  table.mk td, table.mk th { padding: 6px 2px; }
+  table.mk td:first-child, table.mk th:first-child { text-align: left; }
+  .add { border: 1px solid var(--line); background: var(--card2); color: var(--accent); border-radius: 7px;
+    width: 28px; height: 26px; font: inherit; font-weight: 800; cursor: pointer; }
+  .add.on { background: var(--accent); color: #062512; border-color: var(--accent); }
+  .favs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .favs button { border: 1px solid var(--line); background: var(--card2); color: var(--text); border-radius: 999px;
+    padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  .favs button.on { color: var(--accent2); border-color: rgba(245,197,66,.5); }
+  .star { color: var(--accent2); }
+  .leg .lr { display: flex; flex-direction: column; align-items: flex-end; flex: none; gap: 1px; }
+  .leg .lr small { color: var(--muted); font-size: 11px; }
+  .lv { font-size: 11px; font-weight: 800; padding: 0 5px; border-radius: 5px; }
+  .lv.up { background: rgba(47,210,122,.15); color: var(--accent); }
+  .lv.down { background: rgba(255,93,93,.12); color: var(--bad); }
+  .del { border: 0; background: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0 2px 0 8px; flex: none; }
+  .slip h3 { margin: 0; font-size: 16px; }
+  .btnrow { display: flex; gap: 8px; margin-top: 8px; }
+  .btn { display: inline-block; text-align: center; text-decoration: none; border: 0; background: var(--accent);
+    color: #062512; font: inherit; font-weight: 700; font-size: 14px; padding: 9px 14px; border-radius: 10px; cursor: pointer; }
+  .btn.ghost { background: var(--card2); color: var(--text); border: 1px solid var(--line); }
+  .rec { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; font-size: 13px; align-items: baseline; }
+  .rec .h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .rec .pos { color: var(--accent); } .rec .neg { color: var(--bad); }
+  .pday { font-size: 13px; padding: 7px 0; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+  .pday:first-child { border-top: 0; }
+  .st { font-size: 11px; font-weight: 800; border-radius: 6px; padding: 1px 6px; }
+  .st.won { background: rgba(47,210,122,.15); color: var(--accent); }
+  .st.lost { background: rgba(255,93,93,.12); color: var(--bad); }
+  .st.pending { background: var(--card2); color: var(--muted); }
+  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center;
+    z-index: 10; padding: 16px; }
+  .sheet[hidden] { display: none; }
+  .sheet .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px;
+    max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; }
+  .sheet h3 { margin: 0 0 6px; }
+  .sheet ol { padding-left: 20px; margin: 8px 0; font-size: 14px; }
+  .sheet code { background: var(--card2); padding: 2px 6px; border-radius: 6px; user-select: all; }
   .empty { color: var(--muted); text-align: center; padding: 40px 10px; }
   footer { color: var(--muted); font-size: 11px; text-align: center; padding: 10px 16px 30px; max-width: 720px; margin: 0 auto; }
 </style>
@@ -195,7 +243,7 @@
     <h1>Matchday <span>Edge</span></h1>
     <div class="updated" id="updated">Loading…</div>
   </div>
-  <button id="install">Install app</button>
+  <div class="hact"><button class="hbtn" id="alertsBtn">🔔 Alerts</button><button id="install">Install app</button></div>
 </header>
 <div class="ios" id="ios">To install on iPhone: tap <b>Share</b>, then <b>Add to Home Screen</b>.</div>
 <main>
@@ -208,10 +256,31 @@
   <div class="chips" id="chips"></div>
   <div id="view"></div>
 </main>
+<div class="sheet" id="sheet" hidden><div class="panel">
+  <h3>🔔 Phone alerts</h3>
+  <div class="note" style="font-size:13px">Get a notification when lineups are out for games in today's parlays, when a key player is ruled out or dropped, at full time, and when a parlay wins or loses. Alerts work even when the app is closed.</div>
+  <ol>
+    <li>Install the free <b>ntfy</b> app (Google Play or App Store).</li>
+    <li>Tap <b>+</b> and subscribe to this topic: <code id="topic"></code></li>
+  </ol>
+  <div class="note">No app? Open the alerts page in your browser and allow notifications there instead.</div>
+  <div class="btnrow"><a class="btn" id="ntfyLink" target="_blank" rel="noopener">Open alerts page</a>
+    <button class="btn ghost" id="copyTopic">Copy topic</button><button class="btn ghost" id="closeSheet">Close</button></div>
+</div></div>
 <footer>Predictions come from a statistical model and are for entertainment only. Not betting advice.</footer>
 
 <script>
-const LEAGUES = { PL: "Premier League", PD: "La Liga", SA: "Serie A", BL1: "Bundesliga", FL1: "Ligue 1", CL: "Champions League" };
+const LEAGUES = { PL: "Premier League", PD: "La Liga", SA: "Serie A", BL1: "Bundesliga", FL1: "Ligue 1",
+  CL: "Champions League", ELC: "Championship", DED: "Eredivisie", PPL: "Primeira Liga" };
+// Team news, odds, live scores and the parlay record are updated every 5 minutes on the
+// live-data branch and read straight from GitHub, so they show up without a new app release.
+const LIVE_URL = "https://raw.githubusercontent.com/reel-shelf/Matchday-Egde/live-data/data/";
+const NTFY_TOPIC = "matchday-edge-tugoa54ey5";
+const VALUE_MIN = 0.05;   // a bookmaker price 5%+ above fair odds counts as value
+let odds = { matches: {} }, liveScores = { matches: {} }, parlayHist = { days: {} }, newsEval = { matches: {} };
+const loadLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
+const saveLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+let slip = loadLS("slip", []), favs = loadLS("favs", []);
 let data = { matches: [], leagues: {}, tables: {}, best: [] }, history = { matches: {} }, backtest = { rows: [] };
 let tab = "up", league = "ALL", bigSize = 6, tier = 10;
 let baseMatches = [], news = { updated: null, matches: {} };
@@ -219,7 +288,68 @@ let baseMatches = [], news = { updated: null, matches: {} };
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const crest = url => url ? `<img src="${esc(url)}" alt="" loading="lazy">` : "";
-const inLeague = code => league === "ALL" || code === league;
+const inLeague = code => league === "ALL" || league === "FAV" || code === league;
+const isFav = name => favs.includes(name);
+const showMatch = m => league === "FAV" ? isFav(m.home.name) || isFav(m.away.name) : inLeague(m.league);
+
+// ---------------------------------------------------------------- markets, odds and live status
+const MARKETS = ["1", "X", "2", "1X", "X2", "12", "O15", "O25", "O35", "BTTS"];
+function mprob(f, k) {
+  return { "1": f.home, X: f.draw, "2": f.away, "1X": f.dc["1X"], X2: f.dc["X2"], "12": f.dc["12"],
+    O15: f.over15, O25: f.over25, O35: f.over35, BTTS: f.btts }[k];
+}
+function mlabel(m, k) {
+  return { "1": `${m.home.name} to win`, X: "Draw", "2": `${m.away.name} to win`, "1X": `${m.home.name} or draw`,
+    X2: `${m.away.name} or draw`, "12": "Either team wins", O15: "Over 1.5 goals", O25: "Over 2.5 goals",
+    O35: "Over 3.5 goals", BTTS: "Both teams score" }[k];
+}
+function legWins(k, [h, a]) {
+  return { "1": h > a, "2": a > h, X: h === a, "1X": h >= a, X2: a >= h, "12": h !== a,
+    O15: h + a >= 2, O25: h + a >= 3, O35: h + a >= 4, BTTS: h > 0 && a > 0 }[k];
+}
+const bookOf = (m, k) => { const o = (odds.matches || {})[m.id], v = o && o[k]; return v > 1 ? v : null; };
+const valueOf = (p, o) => o ? o * p / 100 - 1 : null;
+const pctv = v => `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
+const scoreOf = m => (liveScores.matches || {})[m.id];
+const isLive = s => s && (s.status === "IN_PLAY" || s.status === "PAUSED");
+const isDone = s => s && (s.status === "FINISHED" || s.status === "AWARDED");
+function legStatus(l) {
+  const s = scoreOf(l.m);
+  if (!s || !l.k) return "";
+  const ok = legWins(l.k, s.score);
+  if (isDone(s)) return `<span class="lv ${ok ? "up" : "down"}">${ok ? "✓" : "✗"} ${s.score[0]}-${s.score[1]}</span>`;
+  if (isLive(s)) return `<span class="lv ${ok ? "up" : "down"}">${s.score[0]}-${s.score[1]}${s.minute ? ` ${s.minute}'` : ""}</span>`;
+  return "";
+}
+const shortDate = d => new Date(d).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+function legRow(l, extra = "", del = "") {
+  const bk = l.k ? bookOf(l.m, l.k) : null, v = valueOf(l.p, bk);
+  return `<div class="leg" data-go="${l.m.id}"><div class="t"><div>${esc(l.label)}${extra}${newsTag(l.m)}${v >= VALUE_MIN ? `<span class="vb">VALUE</span>` : ""}</div>
+    <div>${esc(l.m.home.name)} v ${esc(l.m.away.name)} · ${esc(shortDate(l.m.date))}</div></div>
+    <div class="lr">${legStatus(l)}<b>${l.p}%</b>${bk ? `<small>Bet365 ${bk.toFixed(2)}</small>` : ""}</div>${del}</div>`;
+}
+const fmtOdds = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2);
+function bookTotal(legs) {
+  const ps = legs.map(l => l.k ? bookOf(l.m, l.k) : null);
+  return legs.length && ps.every(Boolean) ? ps.reduce((x, y) => x * y, 1) : null;
+}
+function oddsSummary(legs, fair) {
+  const bk = bookTotal(legs);
+  if (!bk) return `<div class="odds"><span>Fair odds</span><b>${fmtOdds(fair)}</b></div>
+    <div class="note" style="margin:6px 0 0">Only worth betting if a bookmaker pays more than ${fmtOdds(fair)}.${legs.some(l => l.k && bookOf(l.m, l.k)) ? " Bet365 doesn't price every pick here yet." : ""}</div>`;
+  const v = bk / fair - 1;
+  return `<div class="odds"><span>Fair odds</span><b>${fmtOdds(fair)}</b></div>
+    <div class="odds" style="border-top:0;margin-top:0;padding-top:2px"><span>Bet365 pays</span><b>${fmtOdds(bk)}</b></div>
+    <div class="note" style="margin:6px 0 0;${v >= VALUE_MIN ? "color:var(--accent2)" : ""}">${v >= VALUE_MIN
+      ? `💰 Value: Bet365 pays ${pctv(v)} more than the fair price.`
+      : `No value: Bet365 pays ${v < 0 ? `${pctv(-v).slice(1)} less than` : "about the same as"} the fair price.`}</div>`;
+}
+function liveTag(m) {
+  const s = scoreOf(m);
+  if (isLive(s)) return `<span class="live">LIVE ${s.score[0]}-${s.score[1]}${s.minute ? ` ${s.minute}'` : ""}</span>`;
+  if (isDone(s)) return `<span class="ftsc">FT ${s.score[0]}-${s.score[1]}</span>`;
+  return "";
+}
 const formChips = f => f && f.length ? `<div class="form">${f.map(r => `<i class="${r}">${r}</i>`).join("")}</div>` : "";
 
 function pickText(p, home, away) {
@@ -315,7 +445,7 @@ function newsBlock(m) {
 const newsTag = m => m.ftBase ? `<span class="ntag">TEAM NEWS</span>` : "";
 
 function renderChips() {
-  const list = [["ALL", "All"], ...Object.entries(LEAGUES)];
+  const list = [["ALL", "All"], ...(favs.length ? [["FAV", "★ My teams"]] : []), ...Object.entries(LEAGUES)];
   document.getElementById("chips").innerHTML = list.map(([k, v]) =>
     `<button data-l="${k}" class="${k === league ? "on" : ""}">${v}</button>`).join("");
 }
@@ -356,19 +486,21 @@ function card(m) {
     : `<div class="note">No meetings in the last few seasons.</div>`;
   return `<div class="card" data-id="${m.id}" id="m${m.id}">
     <div class="meta"><span>${esc(LEAGUES[m.league] || m.league)}${m.matchday ? " · MD " + m.matchday : ""}</span>
-      <span>${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>
+      <span>${liveTag(m) || d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>
     <div class="teams">
-      <div class="team"><div class="nm">${crest(m.home.crest)}<span>${esc(H)}</span></div>${formChips(m.home.form)}</div>
+      <div class="team"><div class="nm">${crest(m.home.crest)}<span>${isFav(H) ? `<b class="star">★</b> ` : ""}${esc(H)}</span></div>${formChips(m.home.form)}</div>
       <div class="xg"><small>Predicted</small><b>${f.score[0]} – ${f.score[1]}</b>xG ${f.xg[0].toFixed(1)} – ${f.xg[1].toFixed(1)}</div>
-      <div class="team r"><div class="nm">${crest(m.away.crest)}<span>${esc(A)}</span></div>${formChips(m.away.form)}</div>
+      <div class="team r"><div class="nm">${crest(m.away.crest)}<span>${esc(A)}${isFav(A) ? ` <b class="star">★</b>` : ""}</span></div>${formChips(m.away.form)}</div>
     </div>
     ${bar(f.home, f.draw, f.away)}
     <div class="probs"><span class="h">Home ${f.home}%</span><span class="d">Draw ${f.draw}%</span><span class="a">Away ${f.away}%</span></div>
     <div class="pick"><span class="badge">Pick: ${esc(pickText(f.pick, H, A))} <em>${f.pickPct}%</em></span>
       <span class="conf ${f.confidence}">${f.confidence}</span></div>
+    ${valueLine(m)}
     ${newsBlock(m)}
     <div class="more">
-      <div class="sub" style="margin-top:0">Double chance</div>
+      ${marketsTable(m)}
+      <div class="sub">Double chance</div>
       <div class="grid three">
         <div class="stat"><small>Home or draw</small><b>${f.dc["1X"]}%</b></div>
         <div class="stat"><small>Away or draw</small><b>${f.dc["X2"]}%</b></div>
@@ -388,19 +520,75 @@ function card(m) {
       ${cornersBlock(m.corners)}
       <div class="sub">Head to head</div>
       ${h2h}
+      <div class="favs">${[H, A].map(t => `<button data-fav="${esc(t)}" class="${isFav(t) ? "on" : ""}">${isFav(t) ? "★ Following" : "☆ Follow"} ${esc(t)}</button>`).join("")}</div>
     </div>
-    <div class="hint">Tap for double chance, goals, halves, corners & head to head</div>
+    <div class="hint">Tap for odds, build your parlay, goals, halves, corners & head to head</div>
   </div>`;
 }
 
+// Best value on this game's card face.
+function valueLine(m) {
+  let best = null;
+  for (const k of MARKETS) {
+    const p = mprob(m.ft, k), o = bookOf(m, k), v = valueOf(p, o);
+    if (p >= 35 && v >= VALUE_MIN && (!best || v > best.v)) best = { k, p, o, v };
+  }
+  return best ? `<div class="vrow">💰 Value: ${esc(mlabel(m, best.k))} at ${best.o.toFixed(2)} (our chance ${best.p}%, ${pctv(best.v)})</div>` : "";
+}
+// Every market: our chance, fair odds, Bet365 odds, value, and a button to add it to My parlay.
+function marketsTable(m) {
+  const has = MARKETS.some(k => bookOf(m, k));
+  const rows = MARKETS.map(k => {
+    const p = mprob(m.ft, k);
+    if (p == null) return "";
+    const o = bookOf(m, k), v = valueOf(p, o), on = slip.some(s => s.id === m.id && s.k === k);
+    return `<tr><td>${esc(mlabel(m, k))}</td><td>${p}%</td><td>${(100 / p).toFixed(2)}</td>
+      <td>${o ? o.toFixed(2) : "–"}${v >= VALUE_MIN ? `<span class="vb">${pctv(v)}</span>` : ""}</td>
+      <td><button class="add${on ? " on" : ""}" data-add="${m.id}:${k}" aria-label="Add to my parlay">${on ? "✓" : "+"}</button></td></tr>`;
+  }).join("");
+  return `<div class="sub" style="margin-top:0">Odds · tap + to add to My parlay</div>
+    <div class="stat" style="padding:4px 10px"><table class="ctable mk">
+      <tr><th>Pick</th><th>Chance</th><th>Fair</th><th>Bet365</th><th></th></tr>${rows}</table></div>
+    ${has ? "" : `<div class="note" style="margin-top:4px">Bookmaker odds appear about 3 days before kick-off.</div>`}`;
+}
+
+function valueBox(list) {
+  const picks = [];
+  for (const m of list) {
+    if (new Date(m.date) < Date.now()) continue;
+    for (const k of MARKETS) {
+      const p = mprob(m.ft, k), o = bookOf(m, k), v = valueOf(p, o);
+      if (p >= 35 && v >= VALUE_MIN) picks.push({ m, k, p, o, v });
+    }
+  }
+  picks.sort((a, b) => b.v - a.v);
+  const seen = new Set(), top = picks.filter(x => !seen.has(x.m.id) && seen.add(x.m.id)).slice(0, 6);
+  if (!top.length) return "";
+  return `<div class="best" style="border-color:rgba(245,197,66,.4);background:linear-gradient(180deg,rgba(245,197,66,.10),rgba(245,197,66,.02))">
+    <h3 style="color:var(--accent2)">💰 Value bets</h3>
+    <div class="note" style="margin:0 0 4px">Bet365 pays more than our chances say it should.</div>` + top.map(x =>
+    `<div class="bp" data-go="${x.m.id}"><div class="t"><div>${esc(mlabel(x.m, x.k))} · ${x.o.toFixed(2)}</div>
+      <div>${esc(x.m.home.name)} v ${esc(x.m.away.name)} · our chance ${x.p}%</div></div>
+      <b style="color:var(--accent2)">${pctv(x.v)}</b></div>`).join("") + `</div>`;
+}
+
 function renderUpcoming() {
-  const list = data.matches.filter(m => inLeague(m.league));
-  if (!list.length) return `<div class="empty">No upcoming matches in the next two weeks yet. Check back after the next update.</div>`;
+  const list = data.matches.filter(showMatch);
+  if (!list.length) return league === "FAV"
+    ? `<div class="empty">None of your teams play in the next two weeks.</div>`
+    : `<div class="empty">No upcoming matches in the next two weeks yet. Check back after the next update.</div>`;
   const byId = Object.fromEntries(data.matches.map(m => [m.id, m]));
   let best = league === "ALL" ? data.best.map(id => byId[id]).filter(Boolean)
     : [...list].filter(m => (new Date(m.date) - Date.now()) < 7 * 86400000)
         .sort((a, b) => b.ft.pickPct - a.ft.pickPct).slice(0, 6);
-  let html = "";
+  let html = valueBox(list);
+  const mine = league === "ALL" ? list.filter(m => isFav(m.home.name) || isFav(m.away.name)).slice(0, 5) : [];
+  if (mine.length) {
+    html += `<div class="best" style="margin-bottom:8px"><h3>★ Your teams</h3>` + mine.map(m =>
+      `<div class="bp" data-go="${m.id}"><div class="t"><div>${esc(m.home.name)} v ${esc(m.away.name)} ${liveTag(m)}</div>
+        <div>${esc(pickText(m.ft.pick, m.home.name, m.away.name))} · ${esc(dayLabel(new Date(m.date)))}</div></div>
+        <b>${m.ft.pickPct}%</b></div>`).join("") + `</div>`;
+  }
   if (best.length) {
     html += `<div class="best"><h3>★ Best picks this week</h3>` + best.map(m =>
       `<div class="bp" data-go="${m.id}"><div class="t"><div>${esc(m.home.name)} v ${esc(m.away.name)}</div>
@@ -421,16 +609,17 @@ function renderUpcoming() {
 // otherwise favourite or draw. Big parlay: straight wins only, for a bigger payout.
 function favourite(m) {
   const f = m.ft, home = f.home >= f.away;
-  return { name: home ? m.home.name : m.away.name, win: home ? f.home : f.away, dc: home ? f.dc["1X"] : f.dc["X2"] };
+  return { name: home ? m.home.name : m.away.name, win: home ? f.home : f.away, dc: home ? f.dc["1X"] : f.dc["X2"],
+    wk: home ? "1" : "2", dk: home ? "1X" : "X2" };
 }
 function safeLeg(m) {
   const fav = favourite(m);
-  return fav.win >= 65 ? { m, label: `${fav.name} to win`, p: fav.win }
-                       : { m, label: `${fav.name} or draw`, p: fav.dc };
+  return fav.win >= 65 ? { m, k: fav.wk, label: `${fav.name} to win`, p: fav.win }
+                       : { m, k: fav.dk, label: `${fav.name} or draw`, p: fav.dc };
 }
 function winLeg(m) {
   const fav = favourite(m);
-  return { m, label: `${fav.name} to win`, p: fav.win };
+  return { m, k: fav.wk, label: `${fav.name} to win`, p: fav.win };
 }
 
 function parlayCard(title, note, legs, big) {
@@ -441,11 +630,8 @@ function parlayCard(title, note, legs, big) {
     <div class="head"><div><h3>${title}</h3><div class="note" style="margin:2px 0 0">${note}</div></div>
       <div class="chance"><b>${(chance * 100).toFixed(chance < 0.1 ? 1 : 0)}%</b><small>chance all win</small></div></div>
     ${big ? `<div class="sizes">${[5, 6, 7].map(n => `<button data-size="${n}" class="${n === bigSize ? "on" : ""}">${n} picks</button>`).join("")}</div>` : ""}
-    ${legs.map(l => `<div class="leg" data-go="${l.m.id}"><div class="t"><div>${esc(l.label)}${newsTag(l.m)}</div>
-      <div>${esc(l.m.home.name)} v ${esc(l.m.away.name)} · ${esc(new Date(l.m.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }))}</div></div>
-      <b>${l.p}%</b></div>`).join("")}
-    <div class="odds"><span>Fair odds</span><b>${fair.toFixed(2)}</b></div>
-    <div class="note" style="margin:6px 0 0">Only worth betting if a bookmaker pays more than ${fair.toFixed(2)} for this parlay.</div>
+    ${legs.map(l => legRow(l)).join("")}
+    ${oddsSummary(legs, fair)}
   </div>`;
 }
 
@@ -457,11 +643,11 @@ const TIERS = [10, 20, 100, 1000], MAX_LEGS = 30;
 function legOptions(m) {
   const fav = favourite(m), f = m.ft;
   return [
-    { m, label: `${fav.name} to win`, p: fav.win },
-    { m, label: `${fav.name} or draw`, p: fav.dc },
-    { m, label: "Over 1.5 goals", p: f.over15 },
-    { m, label: "Over 2.5 goals", p: f.over25 },
-    { m, label: "Both teams score", p: f.btts },
+    { m, k: fav.wk, label: `${fav.name} to win`, p: fav.win },
+    { m, k: fav.dk, label: `${fav.name} or draw`, p: fav.dc },
+    { m, k: "O15", label: "Over 1.5 goals", p: f.over15 },
+    { m, k: "O25", label: "Over 2.5 goals", p: f.over25 },
+    { m, k: "BTTS", label: "Both teams score", p: f.btts },
   ].filter(l => l.p > 1 && l.p < 99);
 }
 const legOdds = legs => legs.reduce((x, l) => x * 100 / l.p, 1);
@@ -511,23 +697,40 @@ function tierCard(games) {
       <div><b>${(100 / t.odds).toFixed(t.odds >= 100 ? 2 : 1)}%</b><small>Chance</small></div>
     </div>
     ${t.ok ? "" : `<div class="note">Not enough upcoming games to reach ${t.target.toLocaleString()} odds yet. This is as high as it goes.</div>`}
-    ${t.legs.map((l, i) => `<div class="leg" data-go="${l.m.id}"><div class="t"><div>${esc(l.label)}${i >= fresh && prev ? `<span class="new">NEW</span>` : ""}${newsTag(l.m)}</div>
-      <div>${esc(l.m.home.name)} v ${esc(l.m.away.name)} · ${esc(new Date(l.m.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }))}</div></div>
-      <b>${l.p}%</b></div>`).join("")}
-    <div class="note" style="margin:6px 0 0">Only worth betting if a bookmaker pays more than ${fmt(t.odds)} for this parlay.</div>
+    ${t.legs.map((l, i) => legRow(l, i >= fresh && prev ? `<span class="new">NEW</span>` : "")).join("")}
+    ${oddsSummary(t.legs, t.odds)}
+  </div>`;
+}
+
+function slipLegs() {
+  const byId = Object.fromEntries(data.matches.map(m => [m.id, m]));
+  return slip.map(s => byId[s.id] && { m: byId[s.id], k: s.k, label: mlabel(byId[s.id], s.k), p: mprob(byId[s.id].ft, s.k) })
+    .filter(l => l && l.p != null);
+}
+function slipCard() {
+  const legs = slipLegs();
+  if (!legs.length) return `<div class="card slip"><h3>My parlay</h3>
+    <div class="note" style="margin:4px 0 0">Build your own: open any match on the Predictions tab and tap <b>+</b> next to a pick. One pick per game.</div></div>`;
+  const chance = legs.reduce((x, l) => x * l.p / 100, 1);
+  return `<div class="card parlay slip">
+    <div class="head"><div><h3>My parlay</h3><div class="note" style="margin:2px 0 0">${legs.length} pick${legs.length > 1 ? "s" : ""} you chose</div></div>
+      <div class="chance"><b>${(chance * 100).toFixed(chance < 0.1 ? 1 : 0)}%</b><small>chance all win</small></div></div>
+    ${legs.map(l => legRow(l, "", `<button class="del" data-del="${l.m.id}" aria-label="Remove">×</button>`)).join("")}
+    ${oddsSummary(legs, 1 / chance)}
+    <div class="btnrow"><button class="btn ghost" data-clear="1">Clear</button></div>
   </div>`;
 }
 
 function renderParlay() {
-  const soon = data.matches.filter(m => inLeague(m.league) && new Date(m.date) > Date.now()
+  const soon = data.matches.filter(m => showMatch(m) && new Date(m.date) > Date.now()
     && new Date(m.date) - Date.now() < 15 * 86400000);
-  if (soon.length < 3) return `<div class="empty">Not enough upcoming games in the next 2 weeks to build a parlay yet.</div>`;
+  if (soon.length < 3) return slipCard() + `<div class="empty">Not enough upcoming games in the next 2 weeks to build a parlay yet.</div>`;
   const safe = soon.map(safeLeg).sort((a, b) => b.p - a.p).slice(0, 3);
   const wins = soon.map(winLeg).sort((a, b) => b.p - a.p).slice(0, Math.min(bigSize, soon.length));
-  return tierCard(soon)
+  return slipCard() + tierCard(soon)
     + parlayCard("Short parlay", "3 safest picks: the easier one to win", safe, false)
     + parlayCard("Big parlay", "Straight wins only: bigger payout, harder to win", wins, true)
-    + (news.updated ? `<div class="note">Team news checked ${esc(ago(news.updated))}. Games marked TEAM NEWS have odds adjusted for injuries, suspensions and lineups. Lineups are re-checked in the last 5 minutes before kick-off.</div>` : "")
+    + (news.updated ? `<div class="note">Team news checked ${esc(ago(news.updated))}. Games marked TEAM NEWS have odds adjusted for injuries, suspensions and lineups. Lineups are re-checked in the last 5 minutes before kick-off. Bet365 odds are refreshed twice a day for games in the next 3 days.</div>` : "")
     + `<div class="note">Picks come from games in the next 2 weeks, one pick per game. Picks are combined as separate games, so the chance all win is each chance multiplied together. For entertainment only. If you bet, bet responsibly and only if you are of legal age.</div>`;
 }
 
@@ -585,11 +788,62 @@ function summaryBlock(rows) {
   </div>` };
 }
 
+function parlayRecord() {
+  const days = Object.entries(parlayHist.days || {}).sort((a, b) => b[0].localeCompare(a[0]));
+  let html = `<div class="day">Parlays</div>`;
+  if (!days.length) return html + `<div class="note">Every day at 12:00 UTC the app locks in its parlays and checks them against the real results. The first ones will show up here.</div>`;
+  const groups = {};
+  for (const [, d] of days) for (const p of d.parlays) {
+    const g = groups[p.name] ??= { n: 0, won: 0, ret: 0, book: true, pending: 0, order: p.kind === "tier" ? p.target : p.kind === "short" ? 1 : 2e4 };
+    if (p.status === "pending") { g.pending++; continue; }
+    if (p.status !== "won" && p.status !== "lost") continue;
+    g.n++; if (!p.book) g.book = false;
+    if (p.status === "won") { g.won++; g.ret += p.book || p.fair; }
+  }
+  const rows = Object.entries(groups).sort((a, b) => a[1].order - b[1].order).map(([name, g]) => {
+    const profit = g.ret - g.n;
+    return `<div>${esc(name)}${g.pending ? ` <span class="note">(${g.pending} pending)</span>` : ""}</div>
+      <div>${g.n ? `${g.won}/${g.n} won` : "–"}</div>
+      <div class="${profit >= 0 ? "pos" : "neg"}">${g.n ? `${profit >= 0 ? "+" : ""}${profit.toFixed(2)}` : "–"}</div>`;
+  }).join("");
+  html += `<div class="card"><div class="rec"><div class="h">Parlay</div><div class="h">Record</div><div class="h">Profit</div>${rows}</div>
+    <div class="note" style="margin:8px 0 0">Profit if you'd put 1 unit on each parlay, at Bet365 odds when they were available, otherwise at fair odds.</div></div>`;
+  const icon = r => r === true ? "✓" : r === false ? "✗" : r === "void" ? "–" : "·";
+  html += `<div class="card">` + days.slice(0, 7).map(([day, d]) => `<div class="pday" style="display:block">
+      <div style="color:var(--muted);font-size:12px;margin-bottom:4px">${esc(new Date(day + "T12:00:00Z").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }))}</div>
+      ${d.parlays.map(p => `<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0">
+        <span>${esc(p.name)} <span class="note">${p.legs.map(l => icon(l.result)).join("")}</span></span>
+        <span class="st ${p.status}">${p.status === "pending" ? "PENDING" : p.status.toUpperCase()}</span></div>`).join("")}
+    </div>`).join("") + `</div>`;
+  return html;
+}
+
+function newsRecord() {
+  const rows = Object.values(newsEval.matches || {}).filter(e => e.result && inLeague(e.league));
+  let html = `<div class="day">Does team news help?</div>`;
+  if (!rows.length) return html + `<div class="note">As games with team news finish, this compares our chances with and without the injury and lineup adjustment.</div>`;
+  const score = key => {
+    let right = 0, brier = 0;
+    for (const e of rows) {
+      const [h, a] = e.result, out = h > a ? 0 : h === a ? 1 : 2, ps = e[key];
+      if (ps.indexOf(Math.max(...ps)) === out) right++;
+      brier += ps.reduce((s, p, i) => s + (p / 100 - (i === out ? 1 : 0)) ** 2, 0);
+    }
+    return { right: Math.round(100 * right / rows.length), brier: brier / rows.length };
+  };
+  const b = score("base"), a = score("adj"), better = a.brier < b.brier;
+  return html + `<div class="card"><div class="rec">
+      <div class="h">${rows.length} games</div><div class="h">Without</div><div class="h">With news</div>
+      <div>Result picked right</div><div>${b.right}%</div><div class="${a.right >= b.right ? "pos" : "neg"}">${a.right}%</div>
+      <div>Accuracy score <span class="note">(lower is better)</span></div><div>${b.brier.toFixed(3)}</div><div class="${better ? "pos" : "neg"}">${a.brier.toFixed(3)}</div>
+    </div><div class="note" style="margin:8px 0 0">${better ? "So far, adjusting for team news makes the chances more accurate." : "So far, the team-news adjustment isn't making the chances more accurate."} Early results with few games can swing either way.</div></div>`;
+}
+
 function renderResults() {
   const mark = (ok, label) => ok === undefined ? "" : `<span class="mark ${ok ? "ok" : "no"}">${ok ? "✓" : "✗"} ${label}</span>`;
   const live = Object.values(history.matches).filter(r => r.result && inLeague(r.league))
     .sort((a, b) => b.date.localeCompare(a.date));
-  let html = `<div class="day">Live picks</div>`;
+  let html = parlayRecord() + newsRecord() + `<div class="day">Live picks</div>`;
   if (!live.length) {
     html += `<div class="note">No graded live picks yet. Each prediction is locked in before kick-off and checked against the real score after the match.</div>`;
   } else {
@@ -639,6 +893,14 @@ function render() {
     tab === "up" ? renderUpcoming() : tab === "parlay" ? renderParlay()
       : tab === "tables" ? renderTables() : renderResults();
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelector('[data-tab="parlay"]').textContent = slip.length ? `Parlay (${slip.length})` : "Parlay";
+}
+// Re-render without closing open match cards or jumping the page.
+function rerender() {
+  const open = [...document.querySelectorAll(".card.open[data-id]")].map(c => c.dataset.id), y = scrollY;
+  render();
+  open.forEach(id => document.getElementById("m" + id)?.classList.add("open"));
+  scrollTo(0, y);
 }
 
 document.querySelector(".tabs").onclick = e => {
@@ -654,6 +916,24 @@ document.getElementById("view").onclick = e => {
   if (size) { bigSize = +size.dataset.size; render(); return; }
   const tb = e.target.closest("[data-tier]");
   if (tb) { tier = +tb.dataset.tier; render(); return; }
+  const add = e.target.closest("[data-add]");
+  if (add) {
+    const [id, k] = add.dataset.add.split(":"), had = slip.some(s => s.id === +id && s.k === k);
+    slip = slip.filter(s => s.id !== +id);          // one pick per game
+    if (!had) slip.push({ id: +id, k });
+    saveLS("slip", slip); rerender(); return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) { slip = slip.filter(s => s.id !== +del.dataset.del); saveLS("slip", slip); rerender(); return; }
+  if (e.target.closest("[data-clear]")) { slip = []; saveLS("slip", slip); rerender(); return; }
+  const fv = e.target.closest("[data-fav]");
+  if (fv) {
+    const t = fv.dataset.fav;
+    favs = isFav(t) ? favs.filter(x => x !== t) : [...favs, t];
+    saveLS("favs", favs);
+    if (league === "FAV" && !favs.length) league = "ALL";
+    rerender(); return;
+  }
   const go = e.target.closest("[data-go]");
   if (go) {
     if (tab !== "up") { tab = "up"; render(); }
@@ -675,8 +955,7 @@ async function load() {
   if (p) { data = Object.assign(data, p); baseMatches = p.matches || []; }
   if (h) history = h;
   if (b) backtest = b;
-  const n = await get("data/team-news.json");
-  if (n && n.matches) news = n;
+  await refreshLive(true);
   applyNews();
   document.getElementById("updated").textContent = p
     ? `Updated ${ago(p.updated)}` : "No predictions yet. Run the update first.";
@@ -684,20 +963,39 @@ async function load() {
 }
 load();
 
-// Check for new team news every minute while the app is open, and when it comes back on screen.
-async function refreshNews() {
-  if (document.hidden) return;
-  const n = await fetch("data/team-news.json?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null);
-  if (!n || !n.matches || n.updated === news.updated) return;
-  const changed = JSON.stringify(n.matches) !== JSON.stringify(news.matches);
-  news = n;
-  if (!changed) return;
-  const open = [...document.querySelectorAll(".card.open[data-id]")].map(c => c.dataset.id);
-  applyNews(); render();
-  open.forEach(id => document.getElementById("m" + id)?.classList.add("open"));
+// Live data (team news, odds, live scores, parlay record): read from the live-data branch,
+// checked every minute while the app is open and when it comes back on screen.
+async function getLiveFile(name) {
+  const t = "?t=" + Date.now(), get = u => fetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
+  return (await get(LIVE_URL + name + t)) || get("data/" + name + t);
 }
-setInterval(refreshNews, 60000);
-document.addEventListener("visibilitychange", refreshNews);
+async function refreshLive(first) {
+  if (!first && document.hidden) return;
+  const [n, o, l, ph, ev] = await Promise.all(
+    ["team-news.json", "odds.json", "live.json", "parlay-history.json", "news-eval.json"].map(getLiveFile));
+  let changed = false;
+  const upd = (cur, nw, key) => {
+    if (!nw || !nw[key] || JSON.stringify(nw[key]) === JSON.stringify(cur[key])) return cur;
+    changed = true; return nw;
+  };
+  news = upd(news, n, "matches"); odds = upd(odds, o, "matches"); liveScores = upd(liveScores, l, "matches");
+  parlayHist = upd(parlayHist, ph, "days"); newsEval = upd(newsEval, ev, "matches");
+  if (n && n.updated) news.updated = n.updated;
+  if (changed && !first) { applyNews(); rerender(); }
+}
+setInterval(refreshLive, 60000);
+document.addEventListener("visibilitychange", () => refreshLive());
+
+// ---------------------------------------------------------------- alerts sheet
+const sheet = document.getElementById("sheet");
+document.getElementById("topic").textContent = NTFY_TOPIC;
+document.getElementById("ntfyLink").href = "https://ntfy.sh/" + NTFY_TOPIC;
+document.getElementById("alertsBtn").onclick = () => { sheet.hidden = false; };
+document.getElementById("closeSheet").onclick = () => { sheet.hidden = true; };
+sheet.onclick = e => { if (e.target === sheet) sheet.hidden = true; };
+document.getElementById("copyTopic").onclick = async e => {
+  try { await navigator.clipboard.writeText(NTFY_TOPIC); e.target.textContent = "Copied ✓"; } catch (err) {}
+};
 
 // ---------------------------------------------------------------- installable app
 if ("serviceWorker" in navigator) {
