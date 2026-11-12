@@ -2,6 +2,7 @@
 """One-off check of what ESPN's free (unofficial) soccer feed covers. Prints a summary."""
 import json
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -11,12 +12,29 @@ SLUGS = ["uefa.nations", "fifa.friendly", "fifa.worldq.uefa", "fifa.worldq.conme
 
 
 def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.load(r)
+    except urllib.error.HTTPError as e:
+        return {"_error": f"{e.code}: {e.read()[:300]!r}"}
     except Exception as e:  # noqa: BLE001 - this is a probe
         return {"_error": str(e)}
+
+
+# Which request formats work at all?
+_now = datetime.now(timezone.utc)
+for url in [f"{BASE}/eng.1/scoreboard",
+            f"{BASE}/eng.1/scoreboard?dates={_now.strftime('%Y%m%d')}",
+            f"{BASE}/eng.1/scoreboard?dates={_now.strftime('%Y%m%d')}-{(_now + timedelta(days=14)).strftime('%Y%m%d')}",
+            f"{BASE}/eng.1/scoreboard?dates=20240101-20240131&limit=100",
+            f"{BASE}/uefa.nations/scoreboard",
+            f"{BASE}/fifa.friendly/scoreboard",
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard",
+            "https://site.web.api.espn.com/apis/site/v2/sports/soccer/uefa.nations/scoreboard",
+            "https://site.api.espn.com/apis/v2/sports/soccer/eng.1/standings"]:
+    d = get(url)
+    print("FORMAT", url.split("soccer/")[-1], "->", d.get("_error") or f"OK, {len(d.get('events') or [])} events, keys {sorted(d)[:8]}")
 
 
 def keys(d, depth=0):
