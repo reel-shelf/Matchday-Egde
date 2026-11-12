@@ -111,6 +111,22 @@ class Client:
         self.headers = ({"x-rapidapi-key": key, "x-rapidapi-host": RAPID_HOST} if rapid
                         else {"x-apisports-key": key})
 
+    def status(self):
+        """Account check. API-Football's /status endpoint doesn't count toward daily calls."""
+        req = urllib.request.Request(self.base + "/status", headers=self.headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                body = json.load(r)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            return {"ok": False, "error": f"could not reach API-Football: {e}"}
+        errs = body.get("errors")
+        if errs:
+            return {"ok": False, "error": "; ".join(errs.values() if isinstance(errs, dict) else map(str, errs))}
+        r = body.get("response") or {}
+        return {"ok": True, "plan": (r.get("subscription") or {}).get("plan"),
+                "callsToday": (r.get("requests") or {}).get("current"),
+                "dailyLimit": (r.get("requests") or {}).get("limit_day")}
+
     def get(self, path):
         if self.state["calls"] >= self.limit:
             raise OutOfCalls(f"Daily limit of {self.limit} API-Football calls reached")
@@ -242,7 +258,7 @@ def build_news(state, matches, now, limit):
             "lineups": bool(r.get("lineups")), "finalCheck": r.get("finalAt"),
             "injuriesChecked": r.get("injuriesAt"), "lineupsChecked": r.get("lineupsAt"),
         }
-    return {"updated": iso(now), "status": state.get("lastError") or "ok",
+    return {"updated": iso(now), "status": state.get("lastError") or "ok", "account": state.get("account"),
             "callsToday": state["calls"], "limit": limit, "matches": out}
 
 
@@ -282,6 +298,10 @@ def main():
     state["dates"] = {d: v for d, v in state["dates"].items() if parse(d + "T00:00:00Z") > now - 2 * 86400}
 
     api = Client(key or rapid_key, state, limit, rapid=not key)
+    acct = state.get("account") or {}
+    if not acct.get("ok") or acct.get("day") != today:   # check the key once a day
+        state["account"] = {**api.status(), "day": today}
+        print("API key check:", state["account"])
     try:
         check(api, state, matches, now)
     except (OutOfCalls, RuntimeError, urllib.error.URLError, OSError) as e:
