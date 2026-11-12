@@ -1,9 +1,13 @@
 name: Update team news
-# Injuries, suspensions and lineups from API-Football. Runs every 10 minutes; when a
-# game kicks off soon, the run waits and does a final check 4 minutes before kick-off.
+# Injuries, suspensions and lineups from API-Football.
+# GitHub often starts scheduled runs late (sometimes only once an hour), so each run
+# stays on for up to 5 hours 40 minutes and checks every 5 minutes itself. The hourly
+# schedule just restarts it when it ends; only one run is active at a time.
+# When a game is close, team_news.py also waits and does a final check 4 minutes
+# before kick-off.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "7 * * * *"
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -13,20 +17,30 @@ concurrency:
 jobs:
   news:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
-      - name: Check team news
-        run: python3 team_news.py
+      - name: Check team news every 5 minutes
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
-      - name: Save to the repo
         run: |
           git config user.name github-actions
           git config user.email github-actions@users.noreply.github.com
-          git add data/team-news.json data/team-news-state.json 2>/dev/null || true
-          git diff --cached --quiet && exit 0
-          git commit -q -m "Update team news"
-          for i in 1 2 3 4; do git pull --rebase -q && git push -q && exit 0; sleep $((i * 5)); done
-          exit 1
+          if [ -z "$API_FOOTBALL_KEY$RAPIDAPI_KEY" ]; then
+            echo "No API key secret set yet, so there is no team news to fetch."; exit 0
+          fi
+          end=$(( $(date +%s) + 340 * 60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            started=$(date +%s)
+            git pull --rebase -q || true          # pick up new predictions
+            python3 team_news.py || echo "team_news.py failed; trying again next round"
+            git add data/team-news.json data/team-news-state.json 2>/dev/null || true
+            if ! git diff --cached --quiet; then
+              git commit -q -m "Update team news"
+              for i in 1 2 3 4; do git pull --rebase -q && git push -q && break; sleep $((i * 5)); done
+            fi
+            # next round 5 minutes after this one started
+            wait=$(( 300 - ($(date +%s) - started) ))
+            [ "$wait" -gt 0 ] && sleep "$wait"
+          done
