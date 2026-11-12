@@ -1,0 +1,9 @@
+{
+  "name": "matchday-edge",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^11.1.9",
+    "@netlify/functions": "^6.1.1"
+  }
+}
