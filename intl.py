@@ -211,6 +211,7 @@ def main():
     preds = predict.load_json(os.path.join(OUT_DIR, "predictions.json"), {"matches": [], "leagues": {}})
     history = predict.load_json(os.path.join(OUT_DIR, "history.json"), {"matches": {}})
     preds["matches"] = [m for m in preds.get("matches", []) if m.get("league") != "INT"]
+    counts = predict.recent_counts(games, now)
     added = 0
     for ev in upcoming:
         when = predict.parse_time(ev["date"])
@@ -230,8 +231,13 @@ def main():
         })
         if ev["odds"]:
             p["odds"] = ev["odds"]
+        p["n"] = [counts[h], counts[a]]
+        p["enough"] = min(counts[h], counts[a]) >= predict.MIN_GAMES
         preds["matches"].append(p)
-        history["matches"][str(mid)] = predict.record("INT", ev["date"], h, a, p)
+        if p["enough"]:      # no prediction is made (or graded) without enough data
+            history["matches"][str(mid)] = predict.record("INT", ev["date"], h, a, p)
+        else:
+            history["matches"].pop(str(mid), None)
         added += 1
     preds["matches"].sort(key=lambda m: m["date"])
     preds.setdefault("leagues", {})["INT"] = {"name": "Internationals", "emblem": None}

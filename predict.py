@@ -58,6 +58,19 @@ NEWCOMER = (0.85, 1.15)  # promoted teams / unknown teams start weaker (attack, 
 RHO = -0.06            # small correction so 0-0 / 1-1 draws aren't undercounted
 MAX_GOALS = 10
 BEST_PICKS = 6
+MIN_GAMES = 8          # both teams need this many recent games for a prediction
+RECENT_DAYS = 730      # "recent" = the last 2 years
+
+
+def recent_counts(games, now):
+    """team -> number of finished games in the last RECENT_DAYS."""
+    n = defaultdict(int)
+    since = now - timedelta(days=RECENT_DAYS)
+    for g in games:
+        if g["date"] >= since:
+            n[g["home"]] += 1
+            n[g["away"]] += 1
+    return n
 OUT_DIR = os.environ.get("OUT_DIR", "data")
 CALL_GAP = 6.5         # seconds between API calls (free plan = 10 per minute)
 
@@ -608,6 +621,7 @@ def main():
         out["leagues"][code] = {"name": COMPS[code], "emblem": emblems.get(code)}
 
     horizon = now + timedelta(days=DAYS_AHEAD)
+    counts = recent_counts(games, now)
     for code, m in fixtures:
         when = parse_time(m["utcDate"])
         if not (now < when <= horizon):
@@ -624,10 +638,15 @@ def main():
             "h2h": [{"date": g["date"].date().isoformat(), "league": g["comp"],
                      "home": teams_info[g["home"]]["name"], "away": teams_info[g["away"]]["name"],
                      "score": list(g["ft"])} for g in h2h],
+            "n": [counts[hid], counts[aid]],
+            "enough": min(counts[hid], counts[aid]) >= MIN_GAMES,
         })
         out["matches"].append(p)
-        history["matches"][str(m["id"])] = record(code, m["utcDate"], p["home"]["name"],
-                                                  p["away"]["name"], p)
+        if p["enough"]:      # no prediction is made (or graded) without enough data
+            history["matches"][str(m["id"])] = record(code, m["utcDate"], p["home"]["name"],
+                                                      p["away"]["name"], p)
+        else:
+            history["matches"].pop(str(m["id"]), None)
 
     # grade finished live predictions; drop postponed ones
     for code, matches in current.items():
@@ -653,7 +672,8 @@ def main():
 
     # best picks: the most likely main picks in the next 7 days
     week = now + timedelta(days=7)
-    soon = [p for p in out["matches"] if parse_time(p["date"]) <= week] or out["matches"]
+    ok = [p for p in out["matches"] if p["enough"]]
+    soon = [p for p in ok if parse_time(p["date"]) <= week] or ok
     soon.sort(key=lambda p: p["ft"]["pickPct"], reverse=True)
     out["best"] = [p["id"] for p in soon[:BEST_PICKS]]
 

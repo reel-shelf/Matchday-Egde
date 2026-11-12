@@ -3,7 +3,7 @@
 Matchday Edge: parlay and team-news track record.
 
 Every day at 12:00 UTC this locks in the parlays the app is showing (the four
-tiers plus the short and big parlays, with team news applied) and saves them to
+tiers plus the Safe, Bold and Long Shot parlays, with team news applied) and saves them to
 parlay-history.json. As games finish, each leg is graded from the real scores.
 
 It also records, just before kick-off, each game's chances with and without the
@@ -75,17 +75,18 @@ def make_parlay(kind, name, legs, odds, target=None):
 
 def lock_today(now, preds, news, odds):
     odds = {**{str(m["id"]): m["odds"] for m in preds.get("matches", []) if m.get("odds")}, **odds}
-    soon = [pl.apply_news(m, news) for m in preds.get("matches", [])
-            if now < parse(m["date"]) < now + timedelta(days=15)]
+    soon = [pl.blend(pl.apply_news(m, news), odds.get(str(m["id"])))
+            for m in preds.get("matches", [])
+            if pl.enough(m) and now < parse(m["date"]) < now + timedelta(days=15)]
     if len(soon) < 3:
         return None
     parlays = []
     for t in pl.build_tiers(soon):
         parlays.append(make_parlay("tier", f"{t['target']:,} odds tier", t["legs"], odds, t["target"]))
-    safe = sorted((pl.safe_leg(m) for m in soon), key=lambda l: -l["p"])[:3]
-    wins = sorted((pl.win_leg(m) for m in soon), key=lambda l: -l["p"])[:6]
-    parlays.append(make_parlay("short", "Short parlay", safe, odds))
-    parlays.append(make_parlay("big", "Big parlay (6 picks)", wins, odds))
+    risk = pl.build_risk(soon)
+    parlays.append(make_parlay("safe", "Safe parlay", risk["safe"], odds))
+    parlays.append(make_parlay("bold", "Bold parlay", risk["bold"], odds))
+    parlays.append(make_parlay("long", "Long Shot parlay", risk["long"], odds))
     return {"locked": now.isoformat().replace("+00:00", "Z"), "parlays": parlays}
 
 
@@ -114,7 +115,8 @@ def main():
     now = datetime.now(timezone.utc)
     preds = load_json(os.path.join(OUT_DIR, "predictions.json"), {"matches": []})
     history = load_json(os.path.join(OUT_DIR, "history.json"), {"matches": {}})
-    news = load_json(os.path.join(LIVE_DIR, "team-news.json"), {}).get("matches", {})
+    news = pl.merge_news(load_json(os.path.join(LIVE_DIR, "team-news.json"), {}).get("matches", {}),
+                         load_json(os.path.join(OUT_DIR, "manual-news.json"), {}).get("matches", {}))
     odds = load_json(os.path.join(LIVE_DIR, "odds.json"), {}).get("matches", {})
     live = load_json(os.path.join(LIVE_DIR, "live.json"), {"matches": {}})
     res = results(history, live)

@@ -11,6 +11,32 @@ import math
 
 TIERS = (10, 20, 100, 1000)
 MAX_LEGS = 30
+MIN_GAMES = 8          # both teams need this many recent games (predict.py sets m["enough"])
+BLEND_UNTIL = 15       # below this many games, our chance is blended with the bookmaker's
+CHECK_EDGE = 0.30      # an edge bigger than this is flagged "check this"
+
+
+def enough(m):
+    return m.get("enough", True)
+
+
+def merge_news(api_news, manual):
+    """Team news from the API plus players you marked yourself (data/manual-news.json)."""
+    out = dict(api_news or {})
+    for k, man in (manual or {}).items():
+        base = out.get(k) or {"home": {"out": [], "benched": []}, "away": {"out": [], "benched": []}}
+        merged = dict(base)
+        for side in ("home", "away"):
+            b = dict(base.get(side) or {"out": [], "benched": []})
+            names = {p.get("name") for p in b.get("out") or []}
+            extra = [{"name": p["name"], "status": "out", "key": bool(p.get("key")),
+                      "reason": "rested" if p.get("type") == "rested" else "injured", "manual": True}
+                     for p in man.get(side) or [] if p.get("name") not in names]
+            b["out"] = list(b.get("out") or []) + extra
+            b.setdefault("benched", [])
+            merged[side] = b
+        out[k] = merged
+    return out
 
 
 # ----------------------------------------------------------------- team news
@@ -71,6 +97,57 @@ def apply_news(m, news):
     out = dict(m)
     out["ftBase"] = m["ft"]
     out["ft"] = full_time(xh * (1 - ah) * (1 + da), xa * (1 - aa) * (1 + dh), m["ft"])
+    return out
+
+
+# ----------------------------------------------------------------- bookmaker blend
+def main_pick(H, D, A):
+    """Same headline-pick rules as predict.py (H, D, A as fractions)."""
+    if max(H, A) >= 0.45:
+        side, p = ("1", H) if H >= A else ("2", A)
+        return side, p, "High" if p >= 0.55 else "Medium"
+    if abs(H - A) < 0.06 and D >= 0.28:
+        return "X", D, "Low"
+    side, p = ("1X", H + D) if H >= A else ("X2", A + D)
+    return side, p, "High" if p >= 0.78 else ("Medium" if p >= 0.68 else "Low")
+
+
+def implied(o):
+    """Bookmaker chances (percent) with the bookmaker's margin taken out."""
+    if not o:
+        return {}
+    r = {}
+    if all(o.get(k) for k in ("1", "X", "2")):
+        s = sum(1 / o[k] for k in ("1", "X", "2"))
+        for k in ("1", "X", "2"):
+            r[k] = 100 / o[k] / s
+    for k in ("O15", "O25", "O35", "BTTS"):
+        if o.get(k):
+            r[k] = min(99.0, 100 / o[k] / 1.05)
+    return r
+
+
+def blend(m, o):
+    """Teams with fewer than BLEND_UNTIL recent games: mix our chance with the bookmaker's.
+    8 games -> half and half; 15 or more -> ours only."""
+    n = min(m.get("n") or [99, 99])
+    imp = implied(o)
+    if n >= BLEND_UNTIL or not imp:
+        return m
+    w = 0.5 + 0.5 * max(0, n - MIN_GAMES) / (BLEND_UNTIL - MIN_GAMES)
+    f = dict(m["ft"])
+    mix = lambda a, b: round(w * a + (1 - w) * b, 1)
+    if "1" in imp:
+        f["home"], f["draw"], f["away"] = mix(f["home"], imp["1"]), mix(f["draw"], imp["X"]), mix(f["away"], imp["2"])
+        f["dc"] = {"1X": round(f["home"] + f["draw"], 1), "X2": round(f["draw"] + f["away"], 1),
+                   "12": round(f["home"] + f["away"], 1)}
+        pick, pp, conf = main_pick(f["home"] / 100, f["draw"] / 100, f["away"] / 100)
+        f.update(pick=pick, pickPct=round(100 * pp, 1), confidence=conf)
+    for k, key in (("O15", "over15"), ("O25", "over25"), ("O35", "over35"), ("BTTS", "btts")):
+        if k in imp:
+            f[key] = mix(f[key], imp[k])
+    out = dict(m)
+    out["ft"], out["blend"] = f, round(w, 2)
     return out
 
 
@@ -140,6 +217,28 @@ def build_tiers(games):
             legs.append(nxt)
         out.append({"target": target, "legs": list(legs), "odds": fair_odds(legs)})
     return out
+
+
+def chance(legs):
+    c = 1.0
+    for l in legs:
+        c *= l["p"] / 100
+    return c
+
+
+def build_risk(games):
+    """Safe (about 55%+ to win), Bold (about 20-30%) and Long Shot (about 5%) parlays."""
+    safe_pool = sorted((safe_leg(m) for m in games), key=lambda l: -l["p"])
+    win_pool = sorted((win_leg(m) for m in games), key=lambda l: -l["p"])
+    def grow(pool, floor, lo, hi):
+        legs = []
+        for l in pool:
+            if len(legs) >= hi or (len(legs) >= lo and chance(legs + [l]) < floor):
+                break
+            legs.append(l)
+        return legs
+    return {"safe": grow(safe_pool, 0.55, 2, 4), "bold": grow(win_pool, 0.20, 3, 10),
+            "long": grow(win_pool, 0.04, 5, 20)}
 
 
 def leg_result(market, ft):
