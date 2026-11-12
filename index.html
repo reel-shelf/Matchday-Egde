@@ -328,17 +328,20 @@ const isFav = name => favs.includes(name);
 const showMatch = m => league === "FAV" ? isFav(m.home.name) || isFav(m.away.name) : inLeague(m.league);
 
 // ---------------------------------------------------------------- markets, odds and live status
-const MARKETS = ["1", "X", "2", "1X", "X2", "12", "O15", "O25", "O35", "BTTS"];
-function mprob(f, k) {
+const MARKETS = ["1", "X", "2", "1X", "X2", "12", "O15", "O25", "O35", "BTTS", "H1_1", "H1_2"];
+function mprob(f, k) {   // f.h1 = 1st-half chances (club games only; set in applyNews)
   return { "1": f.home, X: f.draw, "2": f.away, "1X": f.dc["1X"], X2: f.dc["X2"], "12": f.dc["12"],
-    O15: f.over15, O25: f.over25, O35: f.over35, BTTS: f.btts }[k];
+    O15: f.over15, O25: f.over25, O35: f.over35, BTTS: f.btts, H1_1: f.h1?.home, H1_2: f.h1?.away }[k];
 }
 function mlabel(m, k) {
   return { "1": `${m.home.name} to win`, X: "Draw", "2": `${m.away.name} to win`, "1X": `${m.home.name} or draw`,
     X2: `${m.away.name} or draw`, "12": "Either team wins", O15: "Over 1.5 goals", O25: "Over 2.5 goals",
-    O35: "Over 3.5 goals", BTTS: "Both teams score" }[k];
+    O35: "Over 3.5 goals", BTTS: "Both teams score",
+    H1_1: `${m.home.name} to win 1st half`, H1_2: `${m.away.name} to win 1st half` }[k];
 }
-function legWins(k, [h, a]) {
+// ht: half-time score, needed for 1st-half picks (undefined result without it)
+function legWins(k, [h, a], ht) {
+  if (k.startsWith("H1_")) return ht && ht[0] != null ? (k === "H1_1" ? ht[0] > ht[1] : ht[1] > ht[0]) : undefined;
   return { "1": h > a, "2": a > h, X: h === a, "1X": h >= a, X2: a >= h, "12": h !== a,
     O15: h + a >= 2, O25: h + a >= 3, O35: h + a >= 4, BTTS: h > 0 && a > 0 }[k];
 }
@@ -357,7 +360,10 @@ const isDone = s => s && (s.status === "FINISHED" || s.status === "AWARDED");
 function legStatus(l) {
   const s = scoreOf(l.m);
   if (!s || !l.k) return "";
-  const ok = legWins(l.k, s.score);
+  // 1st-half picks: the half-time score, or the current score while still in the 1st half
+  const ht = s.ht && s.ht[0] != null ? s.ht : s.status === "IN_PLAY" && (s.minute || 0) <= 45 ? s.score : null;
+  const ok = legWins(l.k, s.score, ht);
+  if (ok === undefined) return "";
   if (isDone(s)) return `<span class="lv ${ok ? "up" : "down"}">${ok ? "✓" : "✗"} ${s.score[0]}-${s.score[1]}</span>`;
   if (isLive(s)) return `<span class="lv ${ok ? "up" : "down"}">${s.score[0]}-${s.score[1]}${s.minute ? ` ${s.minute}'` : ""}</span>`;
   return "";
@@ -538,7 +544,8 @@ function applyNews() {
       }
     }
     // compare with and without team news on the same (blended) basis
-    return out.ftBase ? { ...blend(out), ftBase: blend(m).ft } : blend(out);
+    const res = out.ftBase ? { ...blend(out), ftBase: blend(m).ft } : blend(out);
+    return m.league !== "INT" && m.h1 ? { ...res, ft: { ...res.ft, h1: m.h1 } } : res;
   });
 }
 function newsBlock(m) {
@@ -814,8 +821,8 @@ function renderUpcoming() {
 }
 
 // ---------------------------------------------------------------- parlay
-// Short parlay: per game, the favourite to win when it's strong (65%+),
-// otherwise favourite or draw. Big parlay: straight wins only, for a bigger payout.
+// Every parlay mixes pick types (win, win or draw, goals, both teams score, 1st half) instead
+// of piling up straight wins, where one upset sinks everything. Same rules as parlay_logic.py.
 function favourite(m) {
   const f = m.ft, home = f.home >= f.away;
   return { name: home ? m.home.name : m.away.name, win: home ? f.home : f.away, dc: home ? f.dc["1X"] : f.dc["X2"],
@@ -830,20 +837,41 @@ function winLeg(m) {
   const fav = favourite(m);
   return { m, k: fav.wk, label: `${fav.name} to win`, p: fav.win };
 }
+const FAMILY = { "1": "win", "2": "win", "1X": "dc", X2: "dc", O15: "goals", O25: "goals", BTTS: "btts", H1_1: "half", H1_2: "half" };
+function candidates(m) {
+  const fav = favourite(m), f = m.ft, h1k = fav.wk === "1" ? "H1_1" : "H1_2";
+  return [
+    { m, k: fav.wk, label: `${fav.name} to win`, p: fav.win },
+    { m, k: fav.dk, label: `${fav.name} or draw`, p: fav.dc },
+    { m, k: "O15", label: "Over 1.5 goals", p: f.over15 },
+    { m, k: "O25", label: "Over 2.5 goals", p: f.over25 },
+    { m, k: "BTTS", label: "Both teams score", p: f.btts },
+    ...(f.h1 ? [{ m, k: h1k, label: `${fav.name} to win 1st half`, p: mprob(f, h1k) }] : []),
+  ].filter(l => l.p > 1 && l.p < 99);
+}
+const legOptions = candidates;
+// Most likely pick from the pick type used least so far (one pick per game).
+function pickNext(pool, used, counts) {
+  const avail = pool.filter(l => !used.has(l.m.id));
+  if (!avail.length) return null;
+  const least = Math.min(...avail.map(l => counts[FAMILY[l.k]] || 0));
+  return avail.find(l => (counts[FAMILY[l.k]] || 0) === least);
+}
+const mixedPool = (games, lo, hi) => games.flatMap(candidates).filter(l => l.p >= lo && l.p <= hi).sort((a, b) => b.p - a.p);
 
-// Safe (about 55%+ to win), Bold (about 20-30%) and Long Shot (about 5%). Same rules as parlay_logic.py.
+// Safe (about 50%+ to win), Bold (about 20-30%) and Long Shot (about 5%).
 const chanceOf = legs => legs.reduce((x, l) => x * l.p / 100, 1);
 function buildRisk(games) {
-  const safePool = games.map(safeLeg).sort((a, b) => b.p - a.p), winPool = games.map(winLeg).sort((a, b) => b.p - a.p);
-  const grow = (pool, floor, lo, hi) => {
-    const legs = [];
-    for (const l of pool) {
-      if (legs.length >= hi || (legs.length >= lo && chanceOf([...legs, l]) < floor)) break;
-      legs.push(l);
+  const grow = (lo, hi, floor, minLegs, maxLegs) => {
+    const pool = mixedPool(games, lo, hi), used = new Set(), counts = {}, legs = [];
+    while (legs.length < maxLegs) {
+      const next = pickNext(pool, used, counts);
+      if (!next || (legs.length >= minLegs && chanceOf([...legs, next]) < floor)) break;
+      used.add(next.m.id); counts[FAMILY[next.k]] = (counts[FAMILY[next.k]] || 0) + 1; legs.push(next);
     }
     return legs;
   };
-  return { safe: grow(safePool, 0.55, 2, 4), bold: grow(winPool, 0.20, 3, 10), long: grow(winPool, 0.04, 5, 20) };
+  return { safe: grow(68, 98, 0.50, 2, 4), bold: grow(55, 90, 0.20, 3, 8), long: grow(45, 85, 0.04, 5, 14) };
 }
 function riskCard(kind, title, note, legs) {
   if (!legs.length) return "";
@@ -860,23 +888,13 @@ function riskCard(kind, title, note, legs) {
 
 // ---------------------------------------------------------------- free parlay tiers
 // A ladder of parlays that climbs 10 -> 20 -> 100 -> 1,000 odds. Each tier keeps every
-// pick from the tier below and adds more, safest straight wins first. The last pick of
+// pick from the tier below and adds more, mixing pick types, most likely first. The last pick of
 // each tier is chosen (from any market) so the odds land as close above the target as possible.
 const TIERS = [10, 20, 100, 1000], MAX_LEGS = 30;
-function legOptions(m) {
-  const fav = favourite(m), f = m.ft;
-  return [
-    { m, k: fav.wk, label: `${fav.name} to win`, p: fav.win },
-    { m, k: fav.dk, label: `${fav.name} or draw`, p: fav.dc },
-    { m, k: "O15", label: "Over 1.5 goals", p: f.over15 },
-    { m, k: "O25", label: "Over 2.5 goals", p: f.over25 },
-    { m, k: "BTTS", label: "Both teams score", p: f.btts },
-  ].filter(l => l.p > 1 && l.p < 99);
-}
 const legOdds = legs => legs.reduce((x, l) => x * 100 / l.p, 1);
 function buildTiers(games) {
-  const pool = games.map(winLeg).sort((a, b) => b.p - a.p);
-  const used = new Set(), legs = [], out = [];
+  const pool = mixedPool(games, 55, 97);
+  const used = new Set(), legs = [], out = [], counts = {};
   for (const target of TIERS) {
     const start = legs.length;
     while (legs.length < MAX_LEGS) {
@@ -891,9 +909,9 @@ function buildTiers(games) {
           if (o >= target && o <= target * 1.25 && (!finish || o < finish.o)) finish = { l, o };
         }
       }
-      const next = finish ? finish.l : pool.find(l => !used.has(l.m.id));
+      const next = finish ? finish.l : pickNext(pool, used, counts);
       if (!next) break;
-      used.add(next.m.id); legs.push(next);
+      used.add(next.m.id); counts[FAMILY[next.k]] = (counts[FAMILY[next.k]] || 0) + 1; legs.push(next);
     }
     const odds = legOdds(legs);
     out.push({ target, legs: legs.slice(), added: legs.length - start, odds, ok: odds >= target });
@@ -952,8 +970,8 @@ function renderParlay() {
   const risk = buildRisk(soon);
   return slipCard()
     + riskCard("safe", "Safe parlay", "The most likely picks: wins most often, pays least", risk.safe)
-    + riskCard("bold", "Bold parlay", "Straight wins: about a 1 in 4 chance", risk.bold)
-    + riskCard("long", "Long Shot parlay", "Many straight wins: rarely hits, pays big", risk.long)
+    + riskCard("bold", "Bold parlay", "A mix of picks: about a 1 in 4 chance", risk.bold)
+    + riskCard("long", "Long Shot parlay", "Lots of mixed picks: rarely hits, pays big", risk.long)
     + tierCard(soon)
     + (news.updated ? `<div class="note">Team news checked ${esc(ago(news.updated))}. Games marked TEAM NEWS have odds adjusted for injuries, suspensions and lineups. Lineups are re-checked in the last 5 minutes before kick-off. Bookmaker odds are refreshed twice a day.</div>` : "")
     + `<div class="note">Only games where both teams have at least ${MIN_GAMES} recent games are used. "Real win chance" is our model's chance that every pick wins. Picks come from games in the next 2 weeks, one pick per game. Picks are combined as separate games, so the chance all win is each chance multiplied together. For entertainment only. If you bet, bet responsibly and only if you are of legal age.</div>`;

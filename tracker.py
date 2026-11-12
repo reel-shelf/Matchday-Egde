@@ -46,12 +46,12 @@ def parse(s):
 
 
 def results(history, live):
-    """match id -> final score (regular time)."""
-    out = {k: v["result"]["ft"] for k, v in history.get("matches", {}).items()
+    """match id -> (final score in regular time, half-time score or None)."""
+    out = {k: (v["result"]["ft"], v["result"].get("ht")) for k, v in history.get("matches", {}).items()
            if v.get("result") and v["result"].get("ft")}
     for k, v in live.get("matches", {}).items():
         if v.get("status") in ("FINISHED", "AWARDED") and k not in out:
-            out[k] = v["score"]
+            out[k] = (v["score"], v.get("ht"))
     return out
 
 
@@ -97,10 +97,10 @@ def grade(day, res, now):
         for l in p["legs"]:
             if l["result"] is not None:
                 continue
-            ft = res.get(str(l["id"]))
-            if ft:
-                l["result"] = pl.leg_result(l["market"], ft)
-            elif now - parse(l["date"]) > timedelta(days=3):
+            r = res.get(str(l["id"]))
+            if r:
+                l["result"] = pl.leg_result(l["market"], r[0], r[1])
+            if l["result"] is None and now - parse(l["date"]) > timedelta(days=3):
                 l["result"] = "void"          # postponed or cancelled
         rs = [l["result"] for l in p["legs"]]
         if any(r is False for r in rs):
@@ -154,7 +154,7 @@ def main():
                             "adj": [f["home"], f["draw"], f["away"]], "result": None}
     for k, e in ev["matches"].items():
         if e["result"] is None and k in res:
-            e["result"] = res[k]
+            e["result"] = res[k][0]
     cutoff = now - timedelta(days=KEEP_DAYS)
     ev["matches"] = {k: v for k, v in ev["matches"].items() if parse(v["kickoff"]) > cutoff}
     save_if_changed(path, ev)

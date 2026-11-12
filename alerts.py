@@ -82,10 +82,11 @@ def events():
                             f"{game} is in your parlays ({l['label']}). Odds have been adjusted.", ["warning"]))
         s = live.get(k)
         if s and s.get("status") in ("FINISHED", "AWARDED"):
-            won = leg_result(l["market"], s["score"])
+            won = leg_result(l["market"], s["score"], s.get("ht"))
+            verdict = "won" if won else "lost" if won is False else "result to follow"
             out.append((f"ft:{k}", f"FT: {l['home']} {s['score'][0]}-{s['score'][1]} {l['away']}",
-                        f"Parlay pick {l['label']}: {'won' if won else 'lost'}.",
-                        ["white_check_mark" if won else "x"]))
+                        f"Parlay pick {l['label']}: {verdict}.",
+                        ["white_check_mark" if won else "x" if won is False else "soccer"]))
     return out
 
 

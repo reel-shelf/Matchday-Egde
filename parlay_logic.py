@@ -177,14 +177,41 @@ def win_leg(m):
     return leg(m, fav["winMarket"], f"{fav['name']} to win", fav["win"])
 
 
-def leg_options(m):
+# Pick types, so every parlay mixes them instead of piling up straight wins.
+FAMILY = {"1": "win", "2": "win", "1X": "dc", "X2": "dc", "O15": "goals", "O25": "goals",
+          "BTTS": "btts", "H1_1": "half", "H1_2": "half"}
+
+
+def candidates(m):
+    """Every pick we'd consider for a game: favourite to win, favourite or draw, over 1.5 / 2.5
+    goals, both teams score, favourite winning the 1st half (clubs only: needs half-time scores)."""
     fav, f = favourite(m), m["ft"]
     opts = [leg(m, fav["winMarket"], f"{fav['name']} to win", fav["win"]),
             leg(m, fav["dcMarket"], f"{fav['name']} or draw", fav["dc"]),
             leg(m, "O15", "Over 1.5 goals", f["over15"]),
             leg(m, "O25", "Over 2.5 goals", f["over25"]),
             leg(m, "BTTS", "Both teams score", f["btts"])]
+    if m.get("league") != "INT" and m.get("h1"):
+        home = fav["winMarket"] == "1"
+        opts.append(leg(m, "H1_1" if home else "H1_2", f"{fav['name']} to win 1st half",
+                        m["h1"]["home"] if home else m["h1"]["away"]))
     return [l for l in opts if 1 < l["p"] < 99]
+
+
+leg_options = candidates
+
+
+def pick_next(pool, used, counts):
+    """Most likely pick from the pick type used least so far (one pick per game)."""
+    avail = [l for l in pool if l["id"] not in used]
+    if not avail:
+        return None
+    least = min(counts.get(FAMILY[l["market"]], 0) for l in avail)
+    return next(l for l in avail if counts.get(FAMILY[l["market"]], 0) == least)
+
+
+def mixed_pool(games, lo, hi):
+    return sorted((l for m in games for l in candidates(m) if lo <= l["p"] <= hi), key=lambda l: -l["p"])
 
 
 def fair_odds(legs):
@@ -195,25 +222,27 @@ def fair_odds(legs):
 
 
 def build_tiers(games):
-    pool = sorted((win_leg(m) for m in games), key=lambda l: -l["p"])
-    used, legs, out = set(), [], []
+    pool = mixed_pool(games, 55, 97)
+    used, legs, out, counts = set(), [], [], {}
     for target in TIERS:
         while len(legs) < MAX_LEGS:
             odds = fair_odds(legs)
             if odds >= target:
                 break
+            # Can one more pick finish this tier? Take the one landing closest above the target.
             finish = None
             for m in games:
                 if m["id"] in used:
                     continue
-                for l in leg_options(m):
+                for l in candidates(m):
                     o = odds * 100 / l["p"]
                     if target <= o <= target * 1.25 and (finish is None or o < finish[1]):
                         finish = (l, o)
-            nxt = finish[0] if finish else next((l for l in pool if l["id"] not in used), None)
+            nxt = finish[0] if finish else pick_next(pool, used, counts)
             if not nxt:
                 break
             used.add(nxt["id"])
+            counts[FAMILY[nxt["market"]]] = counts.get(FAMILY[nxt["market"]], 0) + 1
             legs.append(nxt)
         out.append({"target": target, "legs": list(legs), "odds": fair_odds(legs)})
     return out
@@ -227,22 +256,28 @@ def chance(legs):
 
 
 def build_risk(games):
-    """Safe (about 55%+ to win), Bold (about 20-30%) and Long Shot (about 5%) parlays."""
-    safe_pool = sorted((safe_leg(m) for m in games), key=lambda l: -l["p"])
-    win_pool = sorted((win_leg(m) for m in games), key=lambda l: -l["p"])
-    def grow(pool, floor, lo, hi):
-        legs = []
-        for l in pool:
-            if len(legs) >= hi or (len(legs) >= lo and chance(legs + [l]) < floor):
+    """Safe (about 50%+ to win), Bold (about 20-30%) and Long Shot (about 5%) parlays,
+    each mixing pick types: wins, win-or-draw, goals, both teams score, 1st half."""
+    def grow(lo, hi, floor, min_legs, max_legs):
+        pool, used, counts, legs = mixed_pool(games, lo, hi), set(), {}, []
+        while len(legs) < max_legs:
+            nxt = pick_next(pool, used, counts)
+            if not nxt or (len(legs) >= min_legs and chance(legs + [nxt]) < floor):
                 break
-            legs.append(l)
+            used.add(nxt["id"])
+            counts[FAMILY[nxt["market"]]] = counts.get(FAMILY[nxt["market"]], 0) + 1
+            legs.append(nxt)
         return legs
-    return {"safe": grow(safe_pool, 0.55, 2, 4), "bold": grow(win_pool, 0.20, 3, 10),
-            "long": grow(win_pool, 0.04, 5, 20)}
+    return {"safe": grow(68, 98, 0.50, 2, 4), "bold": grow(55, 90, 0.20, 3, 8),
+            "long": grow(45, 85, 0.04, 5, 14)}
 
 
-def leg_result(market, ft):
-    """True (won) / False (lost) for a final score."""
+def leg_result(market, ft, ht=None):
+    """True (won) / False (lost), or None if it can't be told (1st-half pick without a half-time score)."""
+    if market.startswith("H1_"):
+        if not ht or ht[0] is None or ht[1] is None:
+            return None
+        return ht[0] > ht[1] if market == "H1_1" else ht[1] > ht[0]
     h, a = ft
     return {"1": h > a, "2": a > h, "X": h == a, "1X": h >= a, "X2": a >= h, "12": h != a,
             "O15": h + a >= 2, "O25": h + a >= 3, "O35": h + a >= 4, "BTTS": h > 0 and a > 0}[market]
