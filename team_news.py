@@ -16,7 +16,8 @@ data/team-news.json for the app. Run by .github/workflows/team-news.yml every
   and the script stops at API_FOOTBALL_DAILY_LIMIT (default 95). Lineups are
   checked before anything else.
 
-Needs one secret, passed in as API_FOOTBALL_KEY (free from api-football.com).
+Needs one secret: API_FOOTBALL_KEY (free from api-football.com), or RAPIDAPI_KEY
+(the same data through rapidapi.com, free "Basic" plan for API-Football).
 """
 import json
 import os
@@ -29,6 +30,8 @@ import urllib.request
 from datetime import datetime, timezone
 
 API = "https://v3.football.api-sports.io"
+RAPID_HOST = "api-football-v1.p.rapidapi.com"
+RAPID_API = f"https://{RAPID_HOST}/v3"
 LEAGUE_IDS = {"PL": 39, "PD": 140, "SA": 135, "BL1": 78, "FL1": 61, "CL": 2}
 MIN = 60
 LOOK_AHEAD = 36 * 3600
@@ -102,14 +105,17 @@ def chunks(xs, n):
 
 
 class Client:
-    def __init__(self, key, state, limit):
-        self.key, self.state, self.limit = key, state, limit
+    def __init__(self, key, state, limit, rapid=False):
+        self.state, self.limit = state, limit
+        self.base = RAPID_API if rapid else API
+        self.headers = ({"x-rapidapi-key": key, "x-rapidapi-host": RAPID_HOST} if rapid
+                        else {"x-apisports-key": key})
 
     def get(self, path):
         if self.state["calls"] >= self.limit:
             raise OutOfCalls(f"Daily limit of {self.limit} API-Football calls reached")
         self.state["calls"] += 1
-        req = urllib.request.Request(API + path, headers={"x-apisports-key": self.key})
+        req = urllib.request.Request(self.base + path, headers=self.headers)
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 body = json.load(r)
@@ -253,8 +259,9 @@ def save(state, news):
 
 def main():
     key = os.environ.get("API_FOOTBALL_KEY")
-    if not key:
-        print("API_FOOTBALL_KEY secret is not set yet, so there is no team news to fetch.")
+    rapid_key = os.environ.get("RAPIDAPI_KEY")
+    if not key and not rapid_key:
+        print("Neither API_FOOTBALL_KEY nor RAPIDAPI_KEY is set yet, so there is no team news to fetch.")
         return
     limit = int(os.environ.get("API_FOOTBALL_DAILY_LIMIT") or 95)
     now = time.time()
@@ -274,7 +281,7 @@ def main():
         state[k] = {i: v for i, v in state[k].items() if i in keep}
     state["dates"] = {d: v for d, v in state["dates"].items() if parse(d + "T00:00:00Z") > now - 2 * 86400}
 
-    api = Client(key, state, limit)
+    api = Client(key or rapid_key, state, limit, rapid=not key)
     try:
         check(api, state, matches, now)
     except (OutOfCalls, RuntimeError, urllib.error.URLError, OSError) as e:
