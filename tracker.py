@@ -74,10 +74,13 @@ def make_parlay(kind, name, legs, odds, target=None):
 
 
 def lock_today(now, preds, news, odds):
+    # same default window as the app: games today and tomorrow (until midnight UTC after tomorrow),
+    # because JustBet only lists games about a day ahead
+    window_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=2)
     odds = {**{str(m["id"]): m["odds"] for m in preds.get("matches", []) if m.get("odds")}, **odds}
     soon = [pl.blend(pl.apply_news(m, news), odds.get(str(m["id"])))
             for m in preds.get("matches", [])
-            if pl.enough(m) and now < parse(m["date"]) < now + timedelta(days=15)]
+            if pl.enough(m) and now < parse(m["date"]) < window_end]
     if len(soon) < 3:
         return None
     parlays = []

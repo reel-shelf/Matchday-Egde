@@ -1071,18 +1071,32 @@ function slipCard() {
   </div>`;
 }
 
+// Which games parlays are built from. JustBet only lists games about a day ahead, so the
+// default is today and tomorrow (your local time); longer windows are for other bookmakers.
+const WINDOWS = { "2d": ["Today & tomorrow", 2], "3d": ["3 days", 3], "7d": ["7 days", 7], "14d": ["2 weeks", 15] };
+let gameWindow = loadLS("gameWindow", "2d");
+function windowEnd() {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  return d.getTime() + (WINDOWS[gameWindow] || WINDOWS["2d"])[1] * 86400000;
+}
+function windowPicker() {
+  return `<div class="sizes" style="margin:0 0 10px">${Object.entries(WINDOWS).map(([k, [label]]) =>
+    `<button data-window="${k}" class="${k === gameWindow ? "on" : ""}">${label}</button>`).join("")}</div>`;
+}
 function renderParlay() {
+  const end = windowEnd();
   const soon = data.matches.filter(m => showMatch(m) && enough(m) && new Date(m.date) > Date.now()
-    && new Date(m.date) - Date.now() < 15 * 86400000);
-  if (soon.length < 3) return slipCard() + `<div class="empty">Not enough upcoming games in the next 2 weeks to build a parlay yet.</div>`;
+    && new Date(m.date) < end);
+  const label = WINDOWS[gameWindow][0].toLowerCase();
+  if (soon.length < 3) return windowPicker() + slipCard() + `<div class="empty">Not enough games (${label}) to build a parlay. Try a longer window above.</div>`;
   const risk = buildRisk(soon);
-  return slipCard()
+  return windowPicker() + slipCard()
     + riskCard("safe", "Safe parlay", "The most likely picks: wins most often, pays least", risk.safe)
     + riskCard("bold", "Bold parlay", "A mix of picks: about a 1 in 4 chance", risk.bold)
     + riskCard("long", "Long Shot parlay", "Lots of mixed picks: rarely hits, pays big", risk.long)
     + tierCard(soon)
     + (news.updated ? `<div class="note">Team news checked ${esc(ago(news.updated))}. Games marked TEAM NEWS have odds adjusted for injuries, suspensions and lineups. Lineups are re-checked in the last 5 minutes before kick-off. Bookmaker odds are refreshed twice a day.</div>` : "")
-    + `<div class="note">Only games where both teams have at least ${MIN_GAMES} recent games are used. "Real win chance" is our model's chance that every pick wins. Picks come from games in the next 2 weeks, one pick per game. Picks are combined as separate games, so the chance all win is each chance multiplied together. For entertainment only. If you bet, bet responsibly and only if you are of legal age.</div>`;
+    + `<div class="note">Only games where both teams have at least ${MIN_GAMES} recent games are used. "Real win chance" is our model's chance that every pick wins. Picks come from games ${label === "today & tomorrow" ? "today and tomorrow" : `in the next ${label}`} (${soon.length} games), one pick per game. Picks are combined as separate games, so the chance all win is each chance multiplied together. For entertainment only. If you bet, bet responsibly and only if you are of legal age.</div>`;
 }
 
 function renderTables() {
@@ -1265,6 +1279,8 @@ document.getElementById("view").onclick = e => {
   if (lg) { league = lg.dataset.l; render(); return; }
   const size = e.target.closest("[data-size]");
   if (size) { bigSize = +size.dataset.size; render(); return; }
+  const gw = e.target.closest("[data-window]");
+  if (gw) { gameWindow = gw.dataset.window; saveLS("gameWindow", gameWindow); render(); return; }
   const tb = e.target.closest("[data-tier]");
   if (tb) { tier = +tb.dataset.tier; render(); return; }
   const tnp = e.target.closest(".tnp");
