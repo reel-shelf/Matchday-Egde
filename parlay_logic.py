@@ -51,6 +51,25 @@ def impact(side):
     return min(att, 0.25), min(dfn, 0.12)
 
 
+CALIB = {}   # goals calibration from predictions.json ("calib"); set by tracker.py
+
+
+def recalibrate(out, old):
+    """Re-apply predict.py's goals calibration after team news changed the expected goals
+    (only for predictions that were calibrated, i.e. club games: they carry "raw")."""
+    if not old.get("raw") or not CALIB:
+        return out
+    keys = {"O15": "over15", "O25": "over25", "O35": "over35", "BTTS": "btts"}
+    raw = {}
+    for mk, key in keys.items():
+        a, b = CALIB.get(mk, (0, 1))
+        p = min(max(out[key] / 100, 1e-4), 1 - 1e-4)
+        raw[key] = out[key]
+        out[key] = round(100 / (1 + math.exp(-(a + b * math.log(p / (1 - p))))), 1)
+    out["raw"] = raw
+    return out
+
+
 def full_time(lh, la, old):
     n, rho = 10, -0.06
     pois = lambda l, k: math.exp(-l) * l ** k / math.factorial(k)
@@ -81,7 +100,7 @@ def full_time(lh, la, old):
                 "dc": {"1X": pc(H + D), "X2": pc(D + A), "12": pc(H + A)},
                 "xg": [round(lh, 2), round(la, 2)],
                 "over15": pc(o15), "over25": pc(o25), "over35": pc(o35), "btts": pc(bt)})
-    return out
+    return recalibrate(out, old)
 
 
 def apply_news(m, news):
@@ -184,13 +203,13 @@ FAMILY = {"1": "win", "2": "win", "1X": "dc", "X2": "dc", "O15": "goals", "O25":
 
 def candidates(m):
     """Every pick we'd consider for a game: favourite to win, favourite or draw, over 1.5 / 2.5
-    goals, both teams score, favourite winning the 1st half (clubs only: needs half-time scores)."""
+    goals, favourite winning the 1st half (clubs only: needs half-time scores)."""
     fav, f = favourite(m), m["ft"]
     opts = [leg(m, fav["winMarket"], f"{fav['name']} to win", fav["win"]),
             leg(m, fav["dcMarket"], f"{fav['name']} or draw", fav["dc"]),
             leg(m, "O15", "Over 1.5 goals", f["over15"]),
-            leg(m, "O25", "Over 2.5 goals", f["over25"]),
-            leg(m, "BTTS", "Both teams score", f["btts"])]
+            leg(m, "O25", "Over 2.5 goals", f["over25"])]
+    # Both teams to score is left out: back-testing showed no real skill there.
     if m.get("league") != "INT" and m.get("h1"):
         home = fav["winMarket"] == "1"
         opts.append(leg(m, "H1_1" if home else "H1_2", f"{fav['name']} to win 1st half",

@@ -16,6 +16,8 @@ jobs:
         run: python3 predict.py
         env:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALLTOKEN }}
+      - name: Score the model (back-test vs baselines and Bet365)
+        run: python3 evaluate.py > /dev/null || echo "evaluate.py failed"
       - name: International games (ESPN + open results dataset, no key needed)
         run: python3 intl.py || echo "intl.py failed; club predictions are still saved"
       - name: Save to the repo

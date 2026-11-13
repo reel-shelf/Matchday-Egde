@@ -52,6 +52,22 @@ TABLE = {"standings": [{"type": "TOTAL", "table": [
     for i, t in enumerate(teams)]}]}
 
 
+def csv_rows(data, url):
+    """football-data.co.uk style rows (with Bet365 odds and corners) for the Premier League file."""
+    if "/E0.csv" not in url:
+        return []
+    yy = int(url.split("/mmz4281/")[1][:2])
+    rows = []
+    for m in data.get(2000 + yy, []):
+        if m["status"] != "FINISHED":
+            continue
+        d = datetime.fromisoformat(m["utcDate"].replace("Z", "+00:00"))
+        rows.append({"Date": d.strftime("%d/%m/%Y"), "HomeTeam": m["homeTeam"]["name"], "AwayTeam": m["awayTeam"]["name"],
+                     "FTHG": str(m["score"]["fullTime"]["home"]), "FTAG": str(m["score"]["fullTime"]["away"]),
+                     "HC": "5", "AC": "4", "B365H": "2.1", "B365D": "3.4", "B365A": "3.6", "B365>2.5": "1.9", "B365<2.5": "1.9"})
+    return rows
+
+
 def run(data, table, out):
     os.makedirs(out, exist_ok=True)
     def fake_fetch(path):
@@ -62,7 +78,8 @@ def run(data, table, out):
         year = int(path.split("season=")[1]) if "season=" in path else 2026
         return {"competition": {"emblem": None}, "matches": data.get(year, [])}
     predict.fetch = fake_fetch
-    predict.fetch_csv = lambda url: []
+    predict.fetch_csv = lambda url: csv_rows(data, url)
+    predict.CALIB_MIN_GAMES = 40     # so the goals calibration switches on in this small league
     predict.OUT_DIR = out
     predict.main()
     return json.load(open(os.path.join(out, "backtest.json")))["rows"]
@@ -92,5 +109,7 @@ diff_after = sum(1 for k in after if A[k]["probs"] != B[k]["probs"])
 print(f"\nscrambled {changed} results from {CUTOFF} on, and the whole league table")
 print(f"games before {CUTOFF}: {same_before}/{len(before)} back-test predictions unchanged")
 print(f"games from {CUTOFF} on: {diff_after}/{len(after)} predictions changed (expected: their own earlier results changed)")
+cal = sum(1 for r in a if r.get("raw") and r["raw"]["over25"] != r["over25"])
+print(f"(goals calibration active on {cal} back-test games; Bet365 odds on {sum(1 for r in a if r.get('book'))})")
 print("LEAK" if same_before != len(before) else "NO LEAK: predictions only use results from before each game")
 sys.exit(1 if same_before != len(before) else 0)

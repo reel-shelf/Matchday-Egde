@@ -328,6 +328,7 @@ const LEAGUES = { PL: "Premier League", PD: "La Liga", SA: "Serie A", BL1: "Bund
 const LIVE_URL = "https://raw.githubusercontent.com/reel-shelf/Matchday-Egde/live-data/data/";
 const NTFY_TOPIC = "matchday-edge-tugoa54ey5";
 const VALUE_MIN = 0.05;   // a bookmaker price 5%+ above fair odds counts as value
+let evaluation = null;
 let odds = { matches: {} }, liveScores = { matches: {} }, parlayHist = { days: {} }, newsEval = { matches: {} };
 const loadLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
 const saveLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -508,9 +509,22 @@ function fullTime(lh, la, old) {
     if (o === side && x > bp) { bp = x; best = [i, j]; }
   }));
   const pc = x => Math.round(1000 * x) / 10;
-  return { ...old, home: pc(H), draw: pc(D), away: pc(A), pick, pickPct: pc(pp), confidence: conf,
+  return recalibrate({ ...old, home: pc(H), draw: pc(D), away: pc(A), pick, pickPct: pc(pp), confidence: conf,
     dc: { "1X": pc(H + D), "X2": pc(D + A), "12": pc(H + A) }, xg: [+lh.toFixed(2), +la.toFixed(2)], score: best,
-    over15: pc(o15), over25: pc(o25), over35: pc(o35), btts: pc(bt) };
+    over15: pc(o15), over25: pc(o25), over35: pc(o35), btts: pc(bt) }, old);
+}
+// Re-apply predict.py's goals calibration ("calib" in predictions.json) after team news changes
+// the expected goals; only for calibrated predictions (club games carry "raw").
+function recalibrate(f, old) {
+  const cal = data.calib;
+  if (!old.raw || !cal) return f;
+  const raw = {};
+  for (const [mk, key] of [["O15", "over15"], ["O25", "over25"], ["O35", "over35"], ["BTTS", "btts"]]) {
+    const [a, b] = cal[mk] || [0, 1], p = Math.min(Math.max(f[key] / 100, 1e-4), 1 - 1e-4);
+    raw[key] = f[key];
+    f[key] = Math.round(1000 / (1 + Math.exp(-(a + b * Math.log(p / (1 - p)))))) / 10;
+  }
+  return { ...f, raw };
 }
 function mergeNews(api, man) {
   if (!man || !(man.home?.length || man.away?.length)) return api;
@@ -926,7 +940,7 @@ function renderUpcoming() {
 }
 
 // ---------------------------------------------------------------- parlay
-// Every parlay mixes pick types (win, win or draw, goals, both teams score, 1st half) instead
+// Every parlay mixes pick types (win, win or draw, goals, 1st half) instead
 // of piling up straight wins, where one upset sinks everything. Same rules as parlay_logic.py.
 function favourite(m) {
   const f = m.ft, home = f.home >= f.away;
@@ -950,7 +964,7 @@ function candidates(m) {
     { m, k: fav.dk, label: `${fav.name} or draw`, p: fav.dc },
     { m, k: "O15", label: "Over 1.5 goals", p: f.over15 },
     { m, k: "O25", label: "Over 2.5 goals", p: f.over25 },
-    { m, k: "BTTS", label: "Both teams score", p: f.btts },
+    // both teams to score is left out: back-testing showed no real skill there
     ...(f.h1 ? [{ m, k: h1k, label: `${fav.name} to win 1st half`, p: mprob(f, h1k) }] : []),
   ].filter(l => l.p > 1 && l.p < 99);
 }
@@ -1118,6 +1132,8 @@ function grade(r) {
   const dcPick = r.dcPick || (r.probs[0] >= r.probs[2] ? "1X" : "X2");
   const out = {
     main: hits(r.pick, actual),
+    result: "1X2"[r.probs.indexOf(Math.max(...r.probs))] === actual,   // the single most likely result
+    home: actual === "1",
     dc: hits(dcPick, actual),
     over25: (r.over25 > 50) === (hg + ag > 2.5),
     btts: (r.btts > 50) === (hg > 0 && ag > 0),
@@ -1141,16 +1157,44 @@ function summaryBlock(rows) {
     return xs.length ? `${Math.round(100 * n / xs.length)}% <small>(${n}/${xs.length})</small>` : "–";
   };
   const hi = g.filter(x => x.r.confidence === "High");
+  // "always pick the commoner side" baselines for the yes/no markets
+  const common = (test) => {
+    const xs = g.filter(x => x.r.result), yes = xs.filter(x => test(x.r.result.ft)).length;
+    return xs.length ? Math.round(100 * Math.max(yes, xs.length - yes) / xs.length) : null;
+  };
+  const o25 = common(([h, a]) => h + a > 2.5), bt = common(([h, a]) => h > 0 && a > 0);
   return { g, html: `<div class="summary">
-    <div class="stat"><small>Main pick</small><b>${rate(g, "main")}</b></div>
-    <div class="stat"><small>High confidence</small><b>${rate(hi, "main")}</b></div>
+    <div class="stat"><small>Result right</small><b>${rate(g, "result")}</b><div class="note" style="margin:2px 0 0">the single most likely result</div></div>
+    <div class="stat"><small>Always home win</small><b>${rate(g, "home")}</b><div class="note" style="margin:2px 0 0">baseline to beat</div></div>
     <div class="stat"><small>Favourite or draw</small><b>${rate(g, "dc")}</b></div>
-    <div class="stat"><small>Over/Under 2.5</small><b>${rate(g, "over25")}</b></div>
-    <div class="stat"><small>Both teams score</small><b>${rate(g, "btts")}</b></div>
+    <div class="stat"><small>High confidence picks</small><b>${rate(hi, "main")}</b></div>
+    <div class="stat"><small>Over/Under 2.5</small><b>${rate(g, "over25")}</b>${o25 ? `<div class="note" style="margin:2px 0 0">always the commoner side: ${o25}%</div>` : ""}</div>
+    <div class="stat"><small>Both teams score</small><b>${rate(g, "btts")}</b>${bt ? `<div class="note" style="margin:2px 0 0">always the commoner side: ${bt}%</div>` : ""}</div>
     <div class="stat"><small>1st half result</small><b>${rate(g, "h1")}</b></div>
     <div class="stat"><small>2nd half result</small><b>${rate(g, "h2")}</b></div>
     <div class="stat"><small>Corners O/U 9.5</small><b>${rate(g, "corners")}</b></div>
   </div>` };
+}
+
+// Honest scorecard from evaluate.py (data/evaluation.json): baselines, Bet365, betting simulation.
+function modelScorecard() {
+  const e = evaluation;
+  if (!e || !e.games) return "";
+  const better = (a, b) => b ? Math.round(100 * (1 - a / b)) : 0;
+  const v = e.vsBook, bt = (e.betting || {}).all, fav = (e.betting || {}).favourite, o = (e.goals || {}).over25, b2 = (e.goals || {}).btts;
+  const money = x => `${x >= 0 ? "+" : ""}${x.toFixed(1)}%`;
+  const lines = [
+    `<div>Picks the right result</div><div><b>${e.result.model}%</b></div><div class="note">always home: ${e.result.alwaysHome}%</div>`,
+    v ? `<div>…vs Bet365's favourite</div><div><b>${v.modelRight}%</b></div><div class="note">Bet365: ${v.bookRight}%</div>` : "",
+    `<div>Chances accuracy vs average chances</div><div><b class="${better(e.brier.model, e.brier.average) > 0 ? "pos" : "neg"}">${better(e.brier.model, e.brier.average)}% better</b></div><div></div>`,
+    v ? `<div>Chances accuracy vs Bet365's</div><div><b class="${v.modelBrier <= v.bookBrier ? "pos" : "neg"}">${v.modelBrier <= v.bookBrier ? "better" : "worse"}</b></div><div class="note">${better(v.modelBrier, v.bookBrier)}%</div>` : "",
+    o ? `<div>Over 2.5 goals chances</div><div><b class="${o.model < o.average ? "pos" : "neg"}">${o.model < o.average ? "some skill" : "no skill"}</b></div><div class="note">${o.book ? (o.modelOnBookGames <= o.book ? "≥ Bet365" : "< Bet365") : ""}</div>` : "",
+    b2 ? `<div>Both teams score chances</div><div><b class="${b2.model < b2.average ? "pos" : "neg"}">${b2.model < b2.average ? "some skill" : "no skill"}</b></div><div class="note">not used in parlays</div>` : "",
+    bt && bt.bets ? `<div>Value bets at Bet365 odds</div><div><b class="${bt.roi >= 0 ? "pos" : "neg"}">${money(bt.roi)}</b></div><div class="note">${bt.bets} bets, ${bt.won} won</div>` : "",
+    fav && fav.bets ? `<div>…vs backing every favourite</div><div><b class="${fav.roi >= 0 ? "pos" : "neg"}">${money(fav.roi)}</b></div><div class="note">${fav.bets} bets</div>` : "",
+  ].join("");
+  return `<div class="day">How good is the model?</div><div class="card"><div class="rec">${lines}</div>
+    <div class="note" style="margin:8px 0 0">This season's ${e.games} games, each predicted only from earlier results. "Chances accuracy" is the Brier score: how close our chances were to what happened. Value bets: 1 unit on each pick where our chance is 35%+ and Bet365's pre-match odds pay 5–30% more than fair. Bet365 odds cover the domestic leagues only.</div></div>`;
 }
 
 function parlayRecord() {
@@ -1208,7 +1252,7 @@ function renderResults() {
   const mark = (ok, label) => ok === undefined ? "" : `<span class="mark ${ok ? "ok" : "no"}">${ok ? "✓" : "✗"} ${label}</span>`;
   const live = Object.values(history.matches).filter(r => r.result && inLeague(r.league))
     .sort((a, b) => b.date.localeCompare(a.date));
-  let html = parlayRecord() + newsRecord() + `<div class="day">Live picks</div>`;
+  let html = modelScorecard() + parlayRecord() + newsRecord() + `<div class="day">Live picks</div>`;
   if (!live.length) {
     html += `<div class="note">No graded live picks yet. Each prediction is locked in before kick-off and checked against the real score after the match.</div>`;
   } else {
@@ -1228,8 +1272,8 @@ function renderResults() {
       html += `<div class="card" style="margin-top:8px">` + Object.keys(LEAGUES).map(c => {
         const xs = s.g.filter(x => x.r.league === c);
         if (!xs.length) return "";
-        const n = xs.filter(x => x.g.main).length;
-        return `<div class="lg" data-l="${c}"><span>${esc(LEAGUES[c])} ›</span><span>${Math.round(100 * n / xs.length)}% main pick · ${xs.length} games</span></div>`;
+        const n = xs.filter(x => x.g.result).length;
+        return `<div class="lg" data-l="${c}"><span>${esc(LEAGUES[c])} ›</span><span>${Math.round(100 * n / xs.length)}% result right · ${xs.length} games</span></div>`;
       }).join("") + `</div>`;
     }
   }
@@ -1334,7 +1378,8 @@ document.getElementById("view").onclick = e => {
 async function load() {
   const bust = "?t=" + Date.now();
   const get = f => fetch(f + bust).then(r => r.ok ? r.json() : null).catch(() => null);
-  const [p, h, b] = await Promise.all([get("data/predictions.json"), get("data/history.json"), get("data/backtest.json")]);
+  const [p, h, b, ev] = await Promise.all([get("data/predictions.json"), get("data/history.json"), get("data/backtest.json"), get("data/evaluation.json")]);
+  if (ev) evaluation = ev;
   if (p) { data = Object.assign(data, p); baseMatches = p.matches || []; }
   if (h) history = h;
   if (b) backtest = b;

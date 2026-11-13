@@ -164,7 +164,8 @@ def parse_csv_date(s):
 
 def load_corners(games, season_start):
     """
-    Corner counts for finished league games, keyed by football-data.org match id.
+    Corner counts and Bet365 pre-match odds for finished league games, keyed by
+    football-data.org match id. Returns (corners, odds).
     The spreadsheets spell team names differently, so names are matched
     automatically: games on the same day with the same score are paired up.
     """
@@ -179,9 +180,10 @@ def load_corners(games, season_start):
             season = f"{yy % 100:02d}{(yy + 1) % 100:02d}"
             for r in fetch_csv(CORNER_URL.format(season=season, file=file)):
                 try:
+                    hc = int(r["HC"]) if (r.get("HC") or "").strip().isdigit() else None
+                    ac = int(r["AC"]) if (r.get("AC") or "").strip().isdigit() else None
                     rows.append((code, parse_csv_date(r.get("Date")), r["HomeTeam"].strip(),
-                                 r["AwayTeam"].strip(), int(r["FTHG"]), int(r["FTAG"]),
-                                 int(r["HC"]), int(r["AC"])))
+                                 r["AwayTeam"].strip(), int(r["FTHG"]), int(r["FTAG"]), hc, ac, csv_odds(r)))
                 except (KeyError, ValueError, TypeError, AttributeError):
                     continue
     rows = [r for r in rows if r[1]]
@@ -196,23 +198,99 @@ def load_corners(games, season_start):
         return out
 
     votes = defaultdict(Counter)
-    for code, d, home, away, hg, ag, hc, ac in rows:
+    for code, d, home, away, hg, ag, hc, ac, _ in rows:
         cands = [g for g in near(code, d) if g["ft"] == (hg, ag)]
         if len(cands) == 1:
             votes[(code, home)][cands[0]["home"]] += 1
             votes[(code, away)][cands[0]["away"]] += 1
     name_to_id = {k: c.most_common(1)[0][0] for k, c in votes.items()}
 
-    corners = {}
-    for code, d, home, away, hg, ag, hc, ac in rows:
+    corners, odds = {}, {}
+    for code, d, home, away, hg, ag, hc, ac, o in rows:
         hid, aid = name_to_id.get((code, home)), name_to_id.get((code, away))
         if hid is None or aid is None:
             continue
         for g in near(code, d):
             if g["home"] == hid and g["away"] == aid:
-                corners[g["id"]] = (hc, ac)
+                if hc is not None and ac is not None:
+                    corners[g["id"]] = (hc, ac)
+                if o:
+                    odds[g["id"]] = o
                 break
-    return corners
+    return corners, odds
+
+
+def csv_odds(r):
+    """Bet365 pre-match odds from a football-data.co.uk row (decimal)."""
+    out = {}
+    for key, col in (("1", "B365H"), ("X", "B365D"), ("2", "B365A"), ("O25", "B365>2.5"), ("U25", "B365<2.5")):
+        try:
+            v = float(r.get(col) or "")
+            if v > 1:
+                out[key] = v
+        except ValueError:
+            pass
+    return out if all(k in out for k in ("1", "X", "2")) else None
+
+
+# ----------------------------------------------------------------- calibration
+# The goals model is simple, so its over/under and both-teams-score chances drift (this
+# season it under-rated goals). Each is corrected with a 2-number logistic fit
+# (p' = 1 / (1 + exp(-(a + b * logit(p))))) on past back-test games with known results.
+CALIB_MARKETS = {"O15": ("over15", lambda f: f[0] + f[1] >= 2), "O25": ("over25", lambda f: f[0] + f[1] >= 3),
+                 "O35": ("over35", lambda f: f[0] + f[1] >= 4), "BTTS": ("btts", lambda f: f[0] > 0 and f[1] > 0)}
+CALIB_MIN_GAMES = 150
+
+
+def logit(p):
+    p = min(max(p, 1e-4), 1 - 1e-4)
+    return math.log(p / (1 - p))
+
+
+def fit_platt(pairs):
+    """pairs: (model chance 0-1, happened 0/1). Returns (a, b); (0, 1) means no change."""
+    if len(pairs) < CALIB_MIN_GAMES:
+        return 0.0, 1.0
+    a, b = 0.0, 1.0
+    for _ in range(50):              # Newton steps with a little ridge towards (0, 1)
+        ga = gb = haa = hab = hbb = 0.0
+        for p, y in pairs:
+            x = logit(p)
+            q = 1 / (1 + math.exp(-(a + b * x)))
+            ga += q - y
+            gb += (q - y) * x
+            w = q * (1 - q)
+            haa += w; hab += w * x; hbb += w * x * x
+        ga += a; gb += b - 1; haa += 1; hbb += 1
+        det = haa * hbb - hab * hab
+        if det <= 0:
+            break
+        da, db = (hbb * ga - hab * gb) / det, (haa * gb - hab * ga) / det
+        a, b = a - da, b - db
+        if abs(da) + abs(db) < 1e-6:
+            break
+    return round(a, 4), round(b, 4)
+
+
+def fit_calibration(rows):
+    """rows: back-test records with results. -> {market: (a, b)}"""
+    out = {}
+    for mk, (key, happened) in CALIB_MARKETS.items():
+        pairs = [(r["raw"][key] / 100, 1 if happened(r["result"]["ft"]) else 0)
+                 for r in rows if r.get("result") and r.get("raw", {}).get(key) is not None]
+        out[mk] = fit_platt(pairs)
+    return out
+
+
+def calibrate(p, calib):
+    """Apply the corrections to a prediction's full-time goals chances (keeps the raw ones)."""
+    f = p["ft"]
+    f["raw"] = {key: f[key] for key, _ in CALIB_MARKETS.values()}
+    for mk, (key, _) in CALIB_MARKETS.items():
+        a, b = calib.get(mk, (0.0, 1.0))
+        q = 1 / (1 + math.exp(-(a + b * logit(f[key] / 100))))
+        f[key] = round(100 * q, 1)
+    return p
 
 
 # ----------------------------------------------------------------- model
@@ -455,7 +533,8 @@ def record(code, date, home, away, p):
         "pick": f["pick"], "confidence": f["confidence"],
         "probs": [f["home"], f["draw"], f["away"]],
         "dcPick": "1X" if f["home"] >= f["away"] else "X2",
-        "score": f["score"], "over25": f["over25"], "btts": f["btts"],
+        "score": f["score"], "over15": f["over15"], "over25": f["over25"], "over35": f["over35"],
+        "btts": f["btts"], "raw": f.get("raw"),
         "h1pick": p["h1"]["pick"], "h2pick": p["h2"]["pick"],
         "cornersOver95": p["corners"]["over"]["9.5"] if p.get("corners") else None,
         "result": None,
@@ -559,7 +638,8 @@ def main():
                     fixtures.append((code, m))
     games.sort(key=lambda g: g["date"])
     print("Corners...")
-    corners = load_corners(games, season_start)
+    corners, book_odds = load_corners(games, season_start)
+    print(f"  Bet365 odds found for {len(book_odds)} games")
     print(f"  corners found for {len(corners)} games")
 
     # starting ratings: promoted teams and teams only seen in Europe start weaker
@@ -587,14 +667,18 @@ def main():
         weeks[monday].append(g)
     backtest, models, cmodel = [], None, None
     for monday in sorted(weeks):
+        # goals calibration fitted only on earlier weeks' games, so the back-test stays honest
+        calib = fit_calibration(backtest)
         models = fit_all(games, teams, centre, monday, models, iters=80 if models is None else 25)
         cmodel = fit_corners(games, corners, teams, centre, monday, cmodel,
                              iters=80 if cmodel is None else 25) if corners else None
         for g in weeks[monday]:
-            p = predict(g["home"], g["away"], models,
-                        cmodel if g["comp"] in CORNER_FILES else None)
+            p = calibrate(predict(g["home"], g["away"], models,
+                                  cmodel if g["comp"] in CORNER_FILES else None), calib)
             r = record(g["comp"], g["date"].isoformat(), teams_info[g["home"]]["name"],
                        teams_info[g["away"]]["name"], p)
+            if g["id"] in book_odds:
+                r["book"] = book_odds[g["id"]]
             r["result"] = {"ft": list(g["ft"]), "ht": list(g["ht"]) if g["ht"] else [None, None],
                            "corners": sum(corners[g["id"]]) if g["id"] in corners else None}
             backtest.append(r)
@@ -622,12 +706,15 @@ def main():
 
     horizon = now + timedelta(days=DAYS_AHEAD)
     counts = recent_counts(games, now)
+    calib = fit_calibration(backtest)
+    out["calib"] = {k: list(v) for k, v in calib.items()}
+    print("Goals calibration:", out["calib"])
     for code, m in fixtures:
         when = parse_time(m["utcDate"])
         if not (now < when <= horizon):
             continue
         hid, aid = m["homeTeam"]["id"], m["awayTeam"]["id"]
-        p = predict(hid, aid, models, cmodel if code in CORNER_FILES else None)
+        p = calibrate(predict(hid, aid, models, cmodel if code in CORNER_FILES else None), calib)
         h2h = sorted(pair_games[frozenset((hid, aid))], key=lambda g: g["date"], reverse=True)[:5]
         p.update({
             "id": m["id"], "league": code, "date": m["utcDate"], "matchday": m.get("matchday"),
