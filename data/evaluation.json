@@ -1,85 +1,103 @@
 {
- "games": 958,
+ "games": 778,
  "result": {
-  "model": 52.6,
-  "alwaysHome": 44.1
+  "model": 55.0,
+  "alwaysHome": 44.2
  },
  "brier": {
-  "model": 0.5832,
-  "average": 0.6438
+  "model": 0.5695,
+  "average": 0.6419
  },
  "vsBook": {
-  "games": 886,
-  "modelRight": 51.5,
-  "bookRight": 53.7,
-  "modelBrier": 0.5885,
-  "bookBrier": 0.5774
+  "games": 706,
+  "modelRight": 53.8,
+  "bookRight": 55.1,
+  "modelBrier": 0.5747,
+  "bookBrier": 0.5654
  },
  "goals": {
   "over25": {
-   "rate": 60.9,
-   "average": 0.2382,
-   "model": 0.2364,
-   "raw": 0.2397,
-   "book": 0.2342,
-   "modelOnBookGames": 0.2402,
-   "bookGames": 886
+   "rate": 60.5,
+   "average": 0.2389,
+   "model": 0.2324,
+   "raw": 0.2336,
+   "book": 0.2315,
+   "modelOnBookGames": 0.2367,
+   "bookGames": 706
   },
   "btts": {
-   "rate": 58.6,
-   "average": 0.2427,
-   "model": 0.2417,
-   "raw": 0.2429
+   "rate": 57.7,
+   "average": 0.2441,
+   "model": 0.242,
+   "raw": 0.2422
   }
  },
  "betting": {
   "favourite": {
-   "bets": 886,
-   "won": 476,
-   "profit": -31.67,
-   "roi": -3.6
+   "bets": 706,
+   "won": 389,
+   "profit": -21.23,
+   "roi": -3.0
   },
   "result": {
-   "bets": 193,
-   "won": 79,
-   "profit": -3.16,
-   "roi": -1.6
+   "bets": 156,
+   "won": 67,
+   "profit": 3.52,
+   "roi": 2.3
   },
   "all": {
-   "bets": 560,
-   "won": 284,
-   "profit": 1.34,
-   "roi": 0.2
+   "bets": 404,
+   "won": 206,
+   "profit": 0.34,
+   "roi": 0.1
   },
   "O25": {
-   "bets": 367,
-   "won": 205,
-   "profit": 4.5,
-   "roi": 1.2
+   "bets": 248,
+   "won": 139,
+   "profit": -3.18,
+   "roi": -1.3
   }
  },
  "blended": {
-  "games": 775,
+  "games": 550,
   "weights": {
-   "result": 0.0,
-   "goals": 0.05
+   "result": 0.1,
+   "goals": 0.15
   },
-  "right": 54.7,
-  "brier": 0.5757,
-  "bookBrier": 0.5751,
-  "modelBrier": 0.5868,
+  "right": 55.3,
+  "brier": 0.5675,
+  "bookBrier": 0.5668,
+  "modelBrier": 0.5762,
   "over25": {
-   "blend": 0.2351,
-   "book": 0.2349,
+   "blend": 0.2355,
+   "book": 0.2348,
    "model": 0.2405
   }
  },
  "bettingBlended": {
   "favourite": {
-   "bets": 775,
-   "won": 420,
-   "profit": -19.76,
-   "roi": -2.5
+   "bets": 550,
+   "won": 301,
+   "profit": -19.5,
+   "roi": -3.5
+  },
+  "O25": {
+   "bets": 20,
+   "won": 12,
+   "profit": 2.61,
+   "roi": 13.0
+  },
+  "all": {
+   "bets": 22,
+   "won": 12,
+   "profit": 0.61,
+   "roi": 2.8
+  },
+  "result": {
+   "bets": 2,
+   "won": 0,
+   "profit": -2.0,
+   "roi": -100.0
   }
  }
 }
