@@ -1,0 +1,61 @@
+{
+ "games": 958,
+ "result": {
+  "model": 52.6,
+  "alwaysHome": 44.1
+ },
+ "brier": {
+  "model": 0.5832,
+  "average": 0.6438
+ },
+ "vsBook": {
+  "games": 886,
+  "modelRight": 51.5,
+  "bookRight": 53.7,
+  "modelBrier": 0.5885,
+  "bookBrier": 0.5774
+ },
+ "goals": {
+  "over25": {
+   "rate": 60.9,
+   "average": 0.2382,
+   "model": 0.2364,
+   "raw": 0.2397,
+   "book": 0.2342,
+   "modelOnBookGames": 0.2402,
+   "bookGames": 886
+  },
+  "btts": {
+   "rate": 58.6,
+   "average": 0.2427,
+   "model": 0.2417,
+   "raw": 0.2429
+  }
+ },
+ "betting": {
+  "favourite": {
+   "bets": 886,
+   "won": 476,
+   "profit": -31.67,
+   "roi": -3.6
+  },
+  "result": {
+   "bets": 193,
+   "won": 79,
+   "profit": -3.16,
+   "roi": -1.6
+  },
+  "all": {
+   "bets": 560,
+   "won": 284,
+   "profit": 1.34,
+   "roi": 0.2
+  },
+  "O25": {
+   "bets": 367,
+   "won": 205,
+   "profit": 4.5,
+   "roi": 1.2
+  }
+ }
+}
