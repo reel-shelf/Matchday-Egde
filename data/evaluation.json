@@ -57,5 +57,29 @@
    "profit": 4.5,
    "roi": 1.2
   }
+ },
+ "blended": {
+  "games": 775,
+  "weights": {
+   "result": 0.0,
+   "goals": 0.05
+  },
+  "right": 54.7,
+  "brier": 0.5757,
+  "bookBrier": 0.5751,
+  "modelBrier": 0.5868,
+  "over25": {
+   "blend": 0.2351,
+   "book": 0.2349,
+   "model": 0.2405
+  }
+ },
+ "bettingBlended": {
+  "favourite": {
+   "bets": 775,
+   "won": 420,
+   "profit": -19.76,
+   "roi": -2.5
+  }
  }
 }
