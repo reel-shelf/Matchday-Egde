@@ -259,6 +259,20 @@
   .tnp .btn { padding: 7px 12px; font-size: 13px; }
   .tnp .note { margin: 8px 0 0; }
   .linkbtn { background: none; border: 0; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
+  .bcode { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px;
+    padding: 9px 10px; border-radius: 10px; background: rgba(47,210,122,.08); border: 1px solid rgba(47,210,122,.35); }
+  .bcode b { font-size: 16px; letter-spacing: 1px; color: var(--accent); }
+  .bcode small { display: block; color: var(--muted); font-size: 11px; }
+  .bcode .btn { padding: 6px 12px; font-size: 13px; }
+  .pbtns { display: flex; gap: 8px; margin-top: 8px; }
+  .pbtns .btn { flex: 1; padding: 8px 6px; font-size: 13px; }
+  .ck { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .ck:first-of-type { border-top: 0; }
+  .ck input { width: 20px; height: 20px; margin-top: 2px; flex: none; accent-color: var(--accent); }
+  .ck .w { flex: 1; min-width: 0; }
+  .ck .w small { display: block; color: var(--muted); font-size: 12px; }
+  .ck.done .w { opacity: .45; text-decoration: line-through; }
+  .ck .cp { flex: none; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--accent); color: #062512;
     font-weight: 700; font-size: 14px; padding: 10px 16px; border-radius: 999px; z-index: 20; }
   .sharebtn { margin-top: 10px; width: 100%; }
@@ -296,6 +310,13 @@
   <div class="btnrow"><a class="btn" id="ntfyLink" target="_blank" rel="noopener">Open alerts page</a>
     <button class="btn ghost" id="copyTopic">Copy topic</button><button class="btn ghost" id="closeSheet">Close</button></div>
 </div></div>
+<div class="sheet" id="slipSheet" hidden><div class="panel">
+  <h3 id="slipTitle">Bet slip checklist</h3>
+  <div class="note" style="font-size:13px">Add each pick in JustBet (or your bookmaker), in kick-off order, and tick it off. Tap <b>Copy</b> to paste the match into the search.</div>
+  <div id="slipList"></div>
+  <div class="odds" id="slipTotal"></div>
+  <div class="btnrow"><button class="btn ghost" id="closeSlip">Close</button></div>
+</div></div>
 <footer>Predictions come from a statistical model and are for entertainment only. Not betting advice.</footer>
 
 <script>
@@ -314,6 +335,8 @@ let slip = loadLS("slip", []), favs = loadLS("favs", []);
 // your phone, so it applies for everyone and to the daily locked parlays), or only on this phone without one.
 const REPO = "reel-shelf/Matchday-Egde", MANUAL_RAW = `https://raw.githubusercontent.com/${REPO}/main/data/manual-news.json`;
 let manual = { matches: {} }, manualLocal = loadLS("manualNews", { matches: {} });
+let codes = { codes: {} }, codesLocal = loadLS("bookingCodes", { codes: {} });
+const CODES_RAW = `https://raw.githubusercontent.com/${REPO}/main/data/booking-codes.json`;
 const MIN_GAMES = 8, BLEND_UNTIL = 15, CHECK_EDGE = 0.30;
 const enough = m => m.enough !== false;
 let data = { matches: [], leagues: {}, tables: {}, best: [] }, history = { matches: {} }, backtest = { rows: [] };
@@ -689,24 +712,92 @@ function teamNewsPanel(m) {
         : "Only saved on this phone."} <button class="linkbtn" data-tn-token="1">${token ? "GitHub connected · change" : "Connect GitHub to save for everyone"}</button></div>
     </div>`;
 }
-async function editManual(fn, label) {
+// Read-change-write a JSON file in the repo's data/ folder with the owner's GitHub token.
+async function editRepoJson(file, empty, fn, message) {
   const token = loadLS("ghToken", "");
-  if (!token) { fn(manualLocal); saveLS("manualNews", manualLocal); return; }
-  const api = `https://api.github.com/repos/${REPO}/contents/data/manual-news.json`;
+  const api = `https://api.github.com/repos/${REPO}/contents/data/${file}`;
   const h = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
   const cur = await fetch(api + "?ref=main&t=" + Date.now(), { headers: h }).then(r => r.ok ? r.json() : null);
-  const doc = cur ? JSON.parse(decodeURIComponent(escape(atob(cur.content.replace(/\n/g, ""))))) : { matches: {} };
-  doc.matches = doc.matches || {};
+  const doc = cur ? JSON.parse(decodeURIComponent(escape(atob(cur.content.replace(/\n/g, ""))))) : empty;
   fn(doc);
-  const live = new Set(baseMatches.map(m => String(m.id)));       // forget games that are over
-  for (const k of Object.keys(doc.matches)) if (!live.has(k)) delete doc.matches[k];
   doc.updated = new Date().toISOString();
-  const body = { message: `Team news: ${label}`, branch: "main", content: btoa(unescape(encodeURIComponent(JSON.stringify(doc, null, 1)))) };
+  const body = { message, branch: "main", content: btoa(unescape(encodeURIComponent(JSON.stringify(doc, null, 1)))) };
   if (cur) body.sha = cur.sha;
   const r = await fetch(api, { method: "PUT", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(r.status === 401 || r.status === 403 || r.status === 404 ? "GitHub didn't accept the token" : "GitHub error " + r.status);
-  manual = doc;
+  return doc;
 }
+async function editManual(fn, label) {
+  if (!loadLS("ghToken", "")) { fn(manualLocal); saveLS("manualNews", manualLocal); return; }
+  manual = await editRepoJson("manual-news.json", { matches: {} }, doc => {
+    doc.matches = doc.matches || {};
+    fn(doc);
+    const live = new Set(baseMatches.map(m => String(m.id)));       // forget games that are over
+    for (const k of Object.keys(doc.matches)) if (!live.has(k)) delete doc.matches[k];
+  }, `Team news: ${label}`);
+}
+
+// ---------------------------------------------------------------- JustBet booking codes
+// Build a parlay once in JustBet, tap Book, and paste the code here: everyone can then load
+// the whole slip in JustBet with that code. A code is tied to the exact picks, so it's hidden
+// if the app's picks change. Saved to data/booking-codes.json (owner's token) or this phone.
+const parlayLegs = {};
+const legSig = legs => legs.map(l => `${l.m.id}:${l.k}`).join("|");
+const codeFor = key => (codesLocal.codes || {})[key] || (codes.codes || {})[key];
+function bookingRow(key, legs) {
+  parlayLegs[key] = legs;
+  const e = codeFor(key), sig = legSig(legs), token = loadLS("ghToken", "");
+  const code = e && e.sig === sig ? `<div class="bcode"><div><small>JustBet booking code</small><b>${esc(e.code)}</b></div>
+      <button class="btn" data-copy="${esc(e.code)}" data-copy-msg="Code copied: paste it into JustBet's booking code box">Copy</button></div>` : "";
+  const stale = e && e.sig !== sig ? `<div class="note" style="margin:8px 0 0">The picks changed since the JustBet code was made, so it's hidden.</div>` : "";
+  return code + stale + `<div class="pbtns">
+    <button class="btn ghost" data-checklist="${key}">📋 Bet slip checklist</button>
+    <button class="btn ghost" data-code-set="${key}">${code ? "Change code" : "+ JustBet code"}${token ? "" : ""}</button></div>`;
+}
+async function setCode(key) {
+  const legs = parlayLegs[key];
+  if (!legs) return;
+  const token = loadLS("ghToken", "");
+  const code = prompt(`Build these ${legs.length} picks in JustBet, tap Book, and paste the booking code here.`
+    + (token ? " It will show for everyone." : " It's saved on this phone only (connect GitHub in a match's team news panel to share it).")
+    + " Leave empty to remove.", (codeFor(key) || {}).code || "");
+  if (code === null) return;
+  const entry = code.trim() ? { code: code.trim().toUpperCase(), sig: legSig(legs), at: new Date().toISOString() } : null;
+  const apply = doc => { doc.codes = doc.codes || {}; if (entry) doc.codes[key] = entry; else delete doc.codes[key]; };
+  try {
+    if (token) codes = await editRepoJson("booking-codes.json", { codes: {} }, apply, `JustBet code for ${key}: ${entry ? entry.code : "removed"}`);
+    else { apply(codesLocal); saveLS("bookingCodes", codesLocal); }
+    toast(entry ? "JustBet code saved" : "Code removed");
+  } catch (err) { toast(err.message); }
+  rerender();
+}
+
+// ---------------------------------------------------------------- bet slip checklist
+const JB_MARKET = {
+  "1": l => `Match Result: ${l.m.home.name}`, "2": l => `Match Result: ${l.m.away.name}`, X: () => "Match Result: Draw",
+  "1X": l => `Double Chance: ${l.m.home.name} or Draw`, X2: l => `Double Chance: ${l.m.away.name} or Draw`, "12": () => "Double Chance: Home or Away",
+  O15: () => "Total Goals: Over 1.5", O25: () => "Total Goals: Over 2.5", O35: () => "Total Goals: Over 3.5",
+  BTTS: () => "Both Teams to Score: Yes", H1_1: l => `1st Half Result: ${l.m.home.name}`, H1_2: l => `1st Half Result: ${l.m.away.name}`,
+};
+const ticked = {};
+function openChecklist(key, title) {
+  const legs = [...(parlayLegs[key] || [])].sort((a, b) => a.m.date.localeCompare(b.m.date));
+  const done = ticked[key] ??= new Set();
+  const when = d => new Date(d).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  document.getElementById("slipTitle").textContent = `${title}: ${legs.length} picks`;
+  document.getElementById("slipList").innerHTML = legs.map(l => {
+    const id = `${l.m.id}:${l.k}`, bk = bookOf(l.m, l.k);
+    return `<div class="ck${done.has(id) ? " done" : ""}"><input type="checkbox" data-tick="${key}|${id}" ${done.has(id) ? "checked" : ""}>
+      <div class="w"><b>${esc(l.m.home.name)} v ${esc(l.m.away.name)}</b><small>${esc(when(l.m.date))}</small>
+        ${esc((JB_MARKET[l.k] || (() => l.label))(l))}${bk ? ` <small>${esc(bookName(l.m))} ${bk.toFixed(2)}</small>` : ""}</div>
+      <button class="btn ghost cp" data-copy="${esc(l.m.home.name)} ${esc(l.m.away.name)}">Copy</button></div>`;
+  }).join("");
+  const fair = legs.reduce((x, l) => x * 100 / l.p, 1), bk = bookTotal(legs);
+  document.getElementById("slipTotal").innerHTML = `<span>Fair odds${bk ? ` · ${esc(books(legs))} total` : ""}</span><b>${fmtOdds(fair)}${bk ? ` · ${fmtOdds(bk)}` : ""}</b>`;
+  document.getElementById("slipSheet").hidden = false;
+}
+const checklistTitles = {};
+function checklistBtn(key, title, legs) { parlayLegs[key] = legs; checklistTitles[key] = title; return `<button class="btn ghost" data-checklist="${key}">📋 Bet slip checklist</button>`; }
 async function tnAdd(id, box) {
   const name = box.querySelector("[data-tn-name]").value.trim();
   if (!name) { toast("Type the player's name first"); return; }
@@ -883,6 +974,7 @@ function riskCard(kind, title, note, legs) {
     ${legs.map(l => legRow(l)).join("")}
     ${oddsSummary(legs, 1 / c)}
     ${shareBtn(kind, title, legs, 1 / c)}
+    ${(checklistTitles[kind] = title, bookingRow(kind, legs))}
   </div>`;
 }
 
@@ -941,6 +1033,7 @@ function tierCard(games) {
     ${t.legs.map((l, i) => legRow(l, i >= fresh && prev ? `<span class="new">NEW</span>` : "")).join("")}
     ${oddsSummary(t.legs, t.odds)}
     ${shareBtn("tier", `${t.target.toLocaleString()} odds parlay`, t.legs, t.odds)}
+    ${(checklistTitles["tier" + t.target] = `${t.target.toLocaleString()} odds parlay`, bookingRow("tier" + t.target, t.legs))}
   </div>`;
 }
 
@@ -960,6 +1053,7 @@ function slipCard() {
     ${legs.map(l => legRow(l, "", `<button class="del" data-del="${l.m.id}" aria-label="Remove">×</button>`)).join("")}
     ${oddsSummary(legs, 1 / chance)}
     <div class="btnrow"><button class="btn ghost" data-clear="1">Clear</button>${shareBtn("mine", "My parlay", legs, 1 / chance).replace("sharebtn", "").replace(" this parlay", "")}</div>
+    <div class="pbtns">${checklistBtn("mine", "My parlay", legs)}</div>
   </div>`;
 }
 
@@ -1167,6 +1261,12 @@ document.getElementById("view").onclick = e => {
     else if (t) tnToken();
     return;                      // typing in the panel shouldn't close the card
   }
+  const cpy = e.target.closest("[data-copy]");
+  if (cpy) { copyText(cpy.dataset.copy, cpy.dataset.copyMsg); return; }
+  const cl = e.target.closest("[data-checklist]");
+  if (cl) { openChecklist(cl.dataset.checklist, checklistTitles[cl.dataset.checklist] || "Parlay"); return; }
+  const cs = e.target.closest("[data-code-set]");
+  if (cs) { setCode(cs.dataset.codeSet); return; }
   const sh = e.target.closest("[data-share]");
   if (sh) { share(shareTexts[sh.dataset.share]); return; }
   const add = e.target.closest("[data-add]");
@@ -1226,6 +1326,8 @@ async function refreshLive(first) {
   if (!first && document.hidden) return;
   const [n, o, l, ph, ev] = await Promise.all(
     ["team-news.json", "odds.json", "live.json", "parlay-history.json", "news-eval.json"].map(getLiveFile));
+  const bc = await fetch(CODES_RAW + "?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null)
+    || await fetch("data/booking-codes.json?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null);
   const mn = await fetch(MANUAL_RAW + "?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null)
     || await fetch("data/manual-news.json?t=" + Date.now()).then(r => r.ok ? r.json() : null).catch(() => null);
   let changed = false;
@@ -1234,7 +1336,7 @@ async function refreshLive(first) {
     changed = true; return nw;
   };
   news = upd(news, n, "matches"); odds = upd(odds, o, "matches"); liveScores = upd(liveScores, l, "matches");
-  parlayHist = upd(parlayHist, ph, "days"); newsEval = upd(newsEval, ev, "matches"); manual = upd(manual, mn, "matches");
+  parlayHist = upd(parlayHist, ph, "days"); newsEval = upd(newsEval, ev, "matches"); manual = upd(manual, mn, "matches"); codes = upd(codes, bc, "codes");
   if (n && n.updated) news.updated = n.updated;
   if (changed && !first) { applyNews(); rerender(); }
 }
@@ -1243,6 +1345,23 @@ document.addEventListener("visibilitychange", () => refreshLive());
 
 document.getElementById("shareApp").onclick = () => share(
   "Matchday Edge: free football predictions, parlays and value bets. Open the link, then Install app (or Share → Add to Home Screen on iPhone).", APP_URL);
+
+async function copyText(text, msg) {
+  try { await navigator.clipboard.writeText(text); toast(msg || "Copied"); } catch (e) { prompt("Copy this:", text); }
+}
+const slipSheet = document.getElementById("slipSheet");
+document.getElementById("closeSlip").onclick = () => { slipSheet.hidden = true; };
+slipSheet.onclick = e => {
+  if (e.target === slipSheet) { slipSheet.hidden = true; return; }
+  const c = e.target.closest("[data-copy]");
+  if (c) { copyText(c.dataset.copy, "Match copied: paste it into JustBet's search"); return; }
+  const t = e.target.closest("[data-tick]");
+  if (t) {
+    const [key, id] = t.dataset.tick.split("|"), set = ticked[key] ??= new Set();
+    t.checked ? set.add(id) : set.delete(id);
+    t.closest(".ck").classList.toggle("done", t.checked);
+  }
+};
 
 // ---------------------------------------------------------------- alerts sheet
 const sheet = document.getElementById("sheet");
