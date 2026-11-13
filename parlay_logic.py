@@ -146,25 +146,30 @@ def implied(o):
     return r
 
 
+BLEND = {}   # our share vs the bookmaker, learned in predict.py (predictions.json "blend"); set by tracker.py
+
+
 def blend(m, o):
-    """Teams with fewer than BLEND_UNTIL recent games: mix our chance with the bookmaker's.
-    8 games -> half and half; 15 or more -> ours only."""
+    """Mix our chances with the bookmaker's (margin removed). Our share is the back-tested best
+    (BLEND), and lower still for teams with fewer than BLEND_UNTIL recent games
+    (8 games -> at most half ours)."""
     n = min(m.get("n") or [99, 99])
     imp = implied(o)
-    if n >= BLEND_UNTIL or not imp:
+    small = 1.0 if n >= BLEND_UNTIL else 0.5 + 0.5 * max(0, n - MIN_GAMES) / (BLEND_UNTIL - MIN_GAMES)
+    w, wg = min(BLEND.get("result", 1.0), small), min(BLEND.get("goals", 1.0), small)
+    if not imp or (w >= 1 and wg >= 1):
         return m
-    w = 0.5 + 0.5 * max(0, n - MIN_GAMES) / (BLEND_UNTIL - MIN_GAMES)
     f = dict(m["ft"])
-    mix = lambda a, b: round(w * a + (1 - w) * b, 1)
+    mix = lambda a, b, s: round(s * a + (1 - s) * b, 1)
     if "1" in imp:
-        f["home"], f["draw"], f["away"] = mix(f["home"], imp["1"]), mix(f["draw"], imp["X"]), mix(f["away"], imp["2"])
+        f["home"], f["draw"], f["away"] = mix(f["home"], imp["1"], w), mix(f["draw"], imp["X"], w), mix(f["away"], imp["2"], w)
         f["dc"] = {"1X": round(f["home"] + f["draw"], 1), "X2": round(f["draw"] + f["away"], 1),
                    "12": round(f["home"] + f["away"], 1)}
         pick, pp, conf = main_pick(f["home"] / 100, f["draw"] / 100, f["away"] / 100)
         f.update(pick=pick, pickPct=round(100 * pp, 1), confidence=conf)
     for k, key in (("O15", "over15"), ("O25", "over25"), ("O35", "over35"), ("BTTS", "btts")):
         if k in imp:
-            f[key] = mix(f[key], imp[k])
+            f[key] = mix(f[key], imp[k], wg)
     out = dict(m)
     out["ft"], out["blend"] = f, round(w, 2)
     return out

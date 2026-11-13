@@ -11,7 +11,9 @@ and writes data/evaluation.json for the Track record tab:
   "the same average chances for every game";
 - goals markets before and after calibration;
 - a betting simulation of the app's value-bet rule at Bet365's pre-match odds:
-  1 unit on every pick where our chance is 35%+ and Bet365 pays 5-30% more than fair.
+  1 unit on every pick where our chance is 35%+ and Bet365 pays 5-30% more than fair;
+- the same again with our chances blended with Bet365's. Each week's blend weight is
+  learned only from earlier weeks' games, so this is a fair test.
 
 Odds come from football-data.co.uk's free results files (domestic leagues only).
 """
@@ -19,6 +21,9 @@ import json
 import math
 import os
 from collections import defaultdict
+from datetime import datetime, timedelta
+
+from predict import fit_blend, book_chances, book_over25
 
 OUT_DIR = os.environ.get("OUT_DIR", "data")
 VALUE_MIN, CHECK_EDGE, MIN_CHANCE = 0.05, 0.30, 35
@@ -38,6 +43,60 @@ def brier2(p, y):
 
 def pct(x):
     return round(100 * x, 1)
+
+
+def simulate(rows, outs, chances):
+    """1 unit on each value bet; chances(r) -> ([home, draw, away] in %, over 2.5 in %)."""
+    bets = defaultdict(lambda: {"bets": 0, "won": 0, "profit": 0.0})
+    for r, o in zip(rows, outs):
+        b = r.get("book")
+        if not b:
+            continue
+        probs, over = chances(r)
+        ft = r["result"]["ft"]
+        picks = [("1", probs[0], o == 0), ("X", probs[1], o == 1), ("2", probs[2], o == 2)]
+        if b.get("O25"):
+            picks.append(("O25", over, ft[0] + ft[1] >= 3))
+        for mk, p, won in picks:
+            odds = b.get(mk)
+            if not odds or p < MIN_CHANCE:
+                continue
+            edge = odds * p / 100 - 1
+            if VALUE_MIN <= edge <= CHECK_EDGE:
+                for k in (mk if mk == "O25" else "result", "all"):
+                    bets[k]["bets"] += 1
+                    bets[k]["won"] += won
+                    bets[k]["profit"] += (odds - 1) if won else -1
+        fav = min(("1", "X", "2"), key=lambda k: b[k])      # baseline: back Bet365's favourite
+        won = (fav == "1" and o == 0) or (fav == "X" and o == 1) or (fav == "2" and o == 2)
+        bets["favourite"]["bets"] += 1
+        bets["favourite"]["won"] += won
+        bets["favourite"]["profit"] += (b[fav] - 1) if won else -1
+    return {k: {**v, "profit": round(v["profit"], 2), "roi": pct(v["profit"] / v["bets"]) if v["bets"] else None}
+            for k, v in bets.items()}
+
+
+def blend_rolling(rows):
+    """id(row) -> ([home, draw, away] %, over 2.5 %) blended with Bet365, using weights fitted
+    only on games from earlier weeks (games before the first 100 with odds are left out)."""
+    week = lambda r: (datetime.fromisoformat(r["date"]) - timedelta(days=datetime.fromisoformat(r["date"]).weekday())).date()
+    ordered = sorted(rows, key=lambda r: r["date"])
+    out, weeks = {}, sorted({week(r) for r in ordered})
+    for wk in weeks:
+        past = [r for r in ordered if week(r) < wk]
+        w = fit_blend(past)
+        if "result" not in w:
+            continue
+        for r in ordered:
+            if week(r) != wk or not r.get("book"):
+                continue
+            bc = book_chances(r["book"])
+            probs = [round(100 * (w["result"] * p / 100 + (1 - w["result"]) * b), 1) for p, b in zip(r["probs"], bc)]
+            bo = book_over25(r["book"])
+            wg = w.get("goals", 1.0)
+            over = round(100 * (wg * r["over25"] / 100 + (1 - wg) * bo), 1) if bo is not None else r["over25"]
+            out[id(r)] = (probs, over)
+    return out
 
 
 def main():
@@ -95,33 +154,28 @@ def main():
     ev["goals"] = goals
 
     # ---- betting simulation: the app's value-bet rule at Bet365 pre-match odds
-    bets = defaultdict(lambda: {"bets": 0, "won": 0, "profit": 0.0})
-    for r, o in zip(rows, outs):
-        b = r.get("book")
-        if not b:
-            continue
-        ft = r["result"]["ft"]
-        picks = [("1", r["probs"][0], o == 0), ("X", r["probs"][1], o == 1), ("2", r["probs"][2], o == 2)]
-        if b.get("O25"):
-            picks.append(("O25", r["over25"], ft[0] + ft[1] >= 3))
-        for mk, p, won in picks:
-            odds = b.get(mk)
-            if not odds or p < MIN_CHANCE:
-                continue
-            edge = odds * p / 100 - 1
-            if VALUE_MIN <= edge <= CHECK_EDGE:
-                for k in (mk if mk == "O25" else "result", "all"):
-                    bets[k]["bets"] += 1
-                    bets[k]["won"] += won
-                    bets[k]["profit"] += (odds - 1) if won else -1
-        # baseline: 1 unit on Bet365's favourite every game
-        fav = min(("1", "X", "2"), key=lambda k: b[k])
-        bets["favourite"]["bets"] += 1
-        won = (fav == "1" and o == 0) or (fav == "X" and o == 1) or (fav == "2" and o == 2)
-        bets["favourite"]["won"] += won
-        bets["favourite"]["profit"] += (b[fav] - 1) if won else -1
-    ev["betting"] = {k: {**v, "profit": round(v["profit"], 2), "roi": pct(v["profit"] / v["bets"]) if v["bets"] else None}
-                     for k, v in bets.items()}
+    ev["betting"] = simulate(rows, outs, lambda r: (r["probs"], r["over25"]))
+
+    # ---- blended with Bet365, weights learned week by week from earlier games only
+    blended = blend_rolling(rows)
+    if blended:
+        bo = [(r, o) for r, o in zip(rows, outs) if r.get("book") and id(r) in blended]
+        m = len(bo)
+        bp = lambda r: [p / 100 for p in blended[id(r)][0]]
+        ev["blended"] = {
+            "games": m, "weights": fit_blend(rows),
+            "right": pct(sum(bp(r).index(max(bp(r))) == o for r, o in bo) / m),
+            "brier": round(sum(brier(bp(r), o) for r, o in bo) / m, 4),
+            "bookBrier": round(sum(brier(book_chances(r["book"]), o) for r, o in bo) / m, 4),
+            "modelBrier": round(sum(brier([p / 100 for p in r["probs"]], o) for r, o in bo) / m, 4),
+        }
+        gl = [(r, 1 if sum(r["result"]["ft"]) >= 3 else 0) for r, _ in bo if book_over25(r["book"]) is not None]
+        if gl:
+            ev["blended"]["over25"] = {
+                "blend": round(sum(brier2(blended[id(r)][1] / 100, y) for r, y in gl) / len(gl), 4),
+                "book": round(sum(brier2(book_over25(r["book"]), y) for r, y in gl) / len(gl), 4),
+                "model": round(sum(brier2(r["over25"] / 100, y) for r, y in gl) / len(gl), 4)}
+        ev["bettingBlended"] = simulate([r for r, _ in bo], [o for _, o in bo], lambda r: blended[id(r)])
 
     with open(os.path.join(OUT_DIR, "evaluation.json"), "w") as f:
         json.dump(ev, f, indent=1)

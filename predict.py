@@ -49,6 +49,7 @@ PAST_SEASONS = {"CL": 1}   # how many earlier seasons to download (default 2)
 CORNER_FILES = {"PL": "E0", "PD": "SP1", "SA": "I1", "BL1": "D1", "FL1": "F1",
                 "ELC": "E1", "DED": "N1", "PPL": "P1"}
 CORNER_URL = "https://www.football-data.co.uk/mmz4281/{season}/{file}.csv"
+FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"   # upcoming games with Bet365 odds
 CORNER_LINES = (6.5, 7.5, 8.5, 9.5, 10.5, 11.5)
 
 DAYS_AHEAD = 14        # how far ahead to predict
@@ -165,7 +166,8 @@ def parse_csv_date(s):
 def load_corners(games, season_start):
     """
     Corner counts and Bet365 pre-match odds for finished league games, keyed by
-    football-data.org match id. Returns (corners, odds).
+    football-data.org match id. Returns (corners, odds, name_to_id); name_to_id maps
+    (competition, spreadsheet team name) -> football-data.org team id.
     The spreadsheets spell team names differently, so names are matched
     automatically: games on the same day with the same score are paired up.
     """
@@ -217,7 +219,66 @@ def load_corners(games, season_start):
                 if o:
                     odds[g["id"]] = o
                 break
-    return corners, odds
+    return corners, odds, name_to_id
+
+
+def load_fixture_odds(fixtures, name_to_id):
+    """Bet365 odds for upcoming league games (football-data.co.uk fixtures file), keyed by match id."""
+    by_div = {f: c for c, f in CORNER_FILES.items()}
+    wanted = defaultdict(list)
+    for code, m in fixtures:
+        wanted[code].append(m)
+    out = {}
+    for r in fetch_csv(FIXTURES_URL):
+        code = by_div.get((r.get("Div") or "").strip())
+        d, o = parse_csv_date(r.get("Date")), csv_odds(r)
+        if not code or not d or not o:
+            continue
+        hid = name_to_id.get((code, (r.get("HomeTeam") or "").strip()))
+        aid = name_to_id.get((code, (r.get("AwayTeam") or "").strip()))
+        for m in wanted[code]:
+            md = parse_time(m["utcDate"]).date()
+            if m["homeTeam"]["id"] == hid and m["awayTeam"]["id"] == aid and abs((md - d).days) <= 1:
+                out[m["id"]] = {"book": "Bet365", **o}
+    return out
+
+
+# ----------------------------------------------------------------- blending with the bookmaker
+# Bookmaker odds carry information our results-only model doesn't (team news, lineups, money).
+# A game's chances are blended: our share w, the bookmaker's (margin removed) 1 - w. w is the
+# value that would have been most accurate on earlier back-test games (Brier score).
+BLEND_STEPS = [i / 20 for i in range(21)]
+BLEND_MIN_GAMES = 100
+
+
+def book_chances(o):
+    s = 1 / o["1"] + 1 / o["X"] + 1 / o["2"]
+    return [1 / o["1"] / s, 1 / o["X"] / s, 1 / o["2"] / s]
+
+
+def book_over25(o):
+    if not (o.get("O25") and o.get("U25")):
+        return None
+    return (1 / o["O25"]) / (1 / o["O25"] + 1 / o["U25"])
+
+
+def fit_blend(rows):
+    """Best share for our model on past games with odds: {'result': w, 'goals': w} (1 = ours only)."""
+    res = [([p / 100 for p in r["probs"]], book_chances(r["book"]), outcome_of(r["result"]["ft"]))
+           for r in rows if r.get("result") and r.get("book")]
+    gl = [(r["over25"] / 100, book_over25(r["book"]), 1 if sum(r["result"]["ft"]) >= 3 else 0)
+          for r in rows if r.get("result") and r.get("book") and book_over25(r["book"]) is not None]
+    out = {}
+    if len(res) >= BLEND_MIN_GAMES:
+        out["result"] = min(BLEND_STEPS, key=lambda w: sum(
+            sum((w * m + (1 - w) * b - (i == o)) ** 2 for i, (m, b) in enumerate(zip(ms, bs))) for ms, bs, o in res))
+    if len(gl) >= BLEND_MIN_GAMES:
+        out["goals"] = min(BLEND_STEPS, key=lambda w: sum((w * m + (1 - w) * b - y) ** 2 for m, b, y in gl))
+    return out
+
+
+def outcome_of(ft):
+    return 0 if ft[0] > ft[1] else 1 if ft[0] == ft[1] else 2
 
 
 def csv_odds(r):
@@ -638,7 +699,7 @@ def main():
                     fixtures.append((code, m))
     games.sort(key=lambda g: g["date"])
     print("Corners...")
-    corners, book_odds = load_corners(games, season_start)
+    corners, book_odds, name_to_id = load_corners(games, season_start)
     print(f"  Bet365 odds found for {len(book_odds)} games")
     print(f"  corners found for {len(corners)} games")
 
@@ -708,6 +769,10 @@ def main():
     counts = recent_counts(games, now)
     calib = fit_calibration(backtest)
     out["calib"] = {k: list(v) for k, v in calib.items()}
+    out["blend"] = fit_blend(backtest)
+    print("Blend with the bookmaker (our share):", out["blend"])
+    upcoming_odds = load_fixture_odds(fixtures, name_to_id)
+    print(f"  Bet365 odds for {len(upcoming_odds)} upcoming games")
     print("Goals calibration:", out["calib"])
     for code, m in fixtures:
         when = parse_time(m["utcDate"])
@@ -725,6 +790,7 @@ def main():
             "h2h": [{"date": g["date"].date().isoformat(), "league": g["comp"],
                      "home": teams_info[g["home"]]["name"], "away": teams_info[g["away"]]["name"],
                      "score": list(g["ft"])} for g in h2h],
+            **({"odds": upcoming_odds[m["id"]]} if m["id"] in upcoming_odds else {}),
             "n": [counts[hid], counts[aid]],
             "enough": min(counts[hid], counts[aid]) >= MIN_GAMES,
         })

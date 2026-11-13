@@ -547,20 +547,23 @@ function implied(m) {
   for (const k of ["O15", "O25", "O35", "BTTS"]) if (o[k]) r[k] = Math.min(99, 100 / o[k] / 1.05);
   return r;
 }
-// Teams with fewer than 15 recent games: mix our chance with the bookmaker's (8 games: half and half).
+// Mix our chances with the bookmaker's (margin removed). Our share is the back-tested best
+// (predictions.json "blend"), and lower still for teams with fewer than 15 recent games
+// (8 games: at most half ours). Same rules as parlay_logic.py.
 function blend(m) {
-  const n = Math.min(...(m.n || [99, 99])), imp = implied(m);
-  if (n >= BLEND_UNTIL || !Object.keys(imp).length) return m;
-  const w = 0.5 + 0.5 * Math.max(0, n - MIN_GAMES) / (BLEND_UNTIL - MIN_GAMES), f = { ...m.ft };
-  const mix = (a, b) => Math.round((w * a + (1 - w) * b) * 10) / 10;
+  const n = Math.min(...(m.n || [99, 99])), imp = implied(m), share = data.blend || {};
+  const small = n >= BLEND_UNTIL ? 1 : 0.5 + 0.5 * Math.max(0, n - MIN_GAMES) / (BLEND_UNTIL - MIN_GAMES);
+  const w = Math.min(share.result ?? 1, small), wg = Math.min(share.goals ?? 1, small);
+  if (!Object.keys(imp).length || (w >= 1 && wg >= 1)) return m;
+  const f = { ...m.ft }, mix = (a, b, s) => Math.round((s * a + (1 - s) * b) * 10) / 10;
   if (imp["1"]) {
-    f.home = mix(f.home, imp["1"]); f.draw = mix(f.draw, imp.X); f.away = mix(f.away, imp["2"]);
+    f.home = mix(f.home, imp["1"], w); f.draw = mix(f.draw, imp.X, w); f.away = mix(f.away, imp["2"], w);
     f.dc = { "1X": +(f.home + f.draw).toFixed(1), X2: +(f.draw + f.away).toFixed(1), "12": +(f.home + f.away).toFixed(1) };
     const [pick, pp, conf] = mainPick(f.home / 100, f.draw / 100, f.away / 100);
     Object.assign(f, { pick, pickPct: Math.round(pp * 1000) / 10, confidence: conf });
   }
-  for (const [k, key] of [["O15", "over15"], ["O25", "over25"], ["O35", "over35"], ["BTTS", "btts"]]) if (imp[k]) f[key] = mix(f[key], imp[k]);
-  return { ...m, ft: f, blend: w };
+  for (const [k, key] of [["O15", "over15"], ["O25", "over25"], ["O35", "over35"], ["BTTS", "btts"]]) if (imp[k]) f[key] = mix(f[key], imp[k], wg);
+  return { ...m, ft: f, blend: w, blendSmall: small < 1 };
 }
 function mainPick(H, D, A) {   // same headline-pick rules as predict.py
   if (Math.max(H, A) >= 0.45) { const p = Math.max(H, A); return [H >= A ? "1" : "2", p, p >= 0.55 ? "High" : "Medium"]; }
@@ -674,7 +677,7 @@ function card(m) {
       <span class="conf ${f.confidence}">${f.confidence}</span></div>
     ${quickAdd(m)}
     ${valueLine(m)}
-    ${m.blend ? `<div class="blendnote">Few recent games (${Math.min(...m.n)}), so these chances are ${Math.round(m.blend * 100)}% ours and ${Math.round((1 - m.blend) * 100)}% the bookmaker's.</div>` : ""}
+    ${m.blend != null ? `<div class="blendnote">Chances are ${Math.round(m.blend * 100)}% our model, ${Math.round((1 - m.blend) * 100)}% the bookmaker's odds (${esc(bookName(m))})${m.blendSmall ? ` (more bookmaker because of few recent games: ${Math.min(...m.n)})` : " (the mix that was most accurate in back-testing)"}.</div>` : ""}
     ${newsBlock(m)}
     <div class="more">
       ${marketsTable(m)}
@@ -1191,6 +1194,9 @@ function modelScorecard() {
     o ? `<div>Over 2.5 goals chances</div><div><b class="${o.model < o.average ? "pos" : "neg"}">${o.model < o.average ? "some skill" : "no skill"}</b></div><div class="note">${o.book ? (o.modelOnBookGames <= o.book ? "≥ Bet365" : "< Bet365") : ""}</div>` : "",
     b2 ? `<div>Both teams score chances</div><div><b class="${b2.model < b2.average ? "pos" : "neg"}">${b2.model < b2.average ? "some skill" : "no skill"}</b></div><div class="note">not used in parlays</div>` : "",
     bt && bt.bets ? `<div>Value bets at Bet365 odds</div><div><b class="${bt.roi >= 0 ? "pos" : "neg"}">${money(bt.roi)}</b></div><div class="note">${bt.bets} bets, ${bt.won} won</div>` : "",
+    e.blended ? `<div>Blended with Bet365: chances accuracy</div><div><b class="${e.blended.brier <= e.blended.bookBrier ? "pos" : "neg"}">${e.blended.brier <= e.blended.bookBrier ? "≥ Bet365" : "< Bet365"}</b></div><div class="note">${better(e.blended.brier, e.blended.bookBrier)}% vs Bet365, ${better(e.blended.brier, e.blended.modelBrier)}% vs ours</div>` : "",
+    e.bettingBlended && e.bettingBlended.all && e.bettingBlended.all.bets ? `<div>Value bets, blended chances</div><div><b class="${e.bettingBlended.all.roi >= 0 ? "pos" : "neg"}">${money(e.bettingBlended.all.roi)}</b></div><div class="note">${e.bettingBlended.all.bets} bets, ${e.bettingBlended.all.won} won</div>` : "",
+    e.blended && e.blended.weights && e.blended.weights.result != null ? `<div>Blend used now (our share)</div><div><b>${Math.round(e.blended.weights.result * 100)}%</b></div><div class="note">goals: ${Math.round((e.blended.weights.goals ?? 1) * 100)}%</div>` : "",
     fav && fav.bets ? `<div>…vs backing every favourite</div><div><b class="${fav.roi >= 0 ? "pos" : "neg"}">${money(fav.roi)}</b></div><div class="note">${fav.bets} bets</div>` : "",
   ].join("");
   return `<div class="day">How good is the model?</div><div class="card"><div class="rec">${lines}</div>

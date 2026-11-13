@@ -118,6 +118,7 @@ def main():
     now = datetime.now(timezone.utc)
     preds = load_json(os.path.join(OUT_DIR, "predictions.json"), {"matches": []})
     pl.CALIB = {k: tuple(v) for k, v in (preds.get("calib") or {}).items()}
+    pl.BLEND = preds.get("blend") or {}
     history = load_json(os.path.join(OUT_DIR, "history.json"), {"matches": {}})
     news = pl.merge_news(load_json(os.path.join(LIVE_DIR, "team-news.json"), {}).get("matches", {}),
                          load_json(os.path.join(OUT_DIR, "manual-news.json"), {}).get("matches", {}))
