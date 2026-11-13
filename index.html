@@ -312,7 +312,8 @@
 </div></div>
 <div class="sheet" id="slipSheet" hidden><div class="panel">
   <h3 id="slipTitle">Bet slip checklist</h3>
-  <div class="note" style="font-size:13px">Add each pick in JustBet (or your bookmaker), in kick-off order, and tick it off. Tap <b>Copy</b> to paste the match into the search.</div>
+  <div class="sizes" id="slipBooks"><button data-book="JustBet">JustBet</button><button data-book="Bet365">Bet365</button></div>
+  <div class="note" style="font-size:13px" id="slipHelp"></div>
   <div id="slipList"></div>
   <div class="odds" id="slipTotal"></div>
   <div class="btnrow"><button class="btn ghost" id="closeSlip">Close</button></div>
@@ -779,8 +780,21 @@ const JB_MARKET = {
   O15: () => "Total Goals: Over 1.5", O25: () => "Total Goals: Over 2.5", O35: () => "Total Goals: Over 3.5",
   BTTS: () => "Both Teams to Score: Yes", H1_1: l => `1st Half Result: ${l.m.home.name}`, H1_2: l => `1st Half Result: ${l.m.away.name}`,
 };
+// Bet365 names the same markets a little differently.
+const B365_MARKET = {
+  "1": l => `Full Time Result: ${l.m.home.name}`, "2": l => `Full Time Result: ${l.m.away.name}`, X: () => "Full Time Result: Draw",
+  "1X": l => `Double Chance: ${l.m.home.name} or Draw`, X2: l => `Double Chance: ${l.m.away.name} or Draw`, "12": () => `Double Chance: ${"Home or Away"}`,
+  O15: () => "Goals Over/Under: Over 1.5", O25: () => "Goals Over/Under: Over 2.5", O35: () => "Goals Over/Under: Over 3.5",
+  BTTS: () => "Both Teams to Score: Yes", H1_1: l => `Half Time Result: ${l.m.home.name}`, H1_2: l => `Half Time Result: ${l.m.away.name}`,
+};
+let slipBook = loadLS("slipBook", "JustBet"), openSlip = null;
 const ticked = {};
 function openChecklist(key, title) {
+  openSlip = [key, title];
+  const names = slipBook === "Bet365" ? B365_MARKET : JB_MARKET;
+  document.querySelectorAll("#slipBooks button").forEach(b => b.classList.toggle("on", b.dataset.book === slipBook));
+  document.getElementById("slipHelp").innerHTML = `Add each pick in ${slipBook}, in kick-off order, and tick it off. Tap <b>Copy</b> to paste the match into ${slipBook}'s search.`
+    + (slipBook === "JustBet" ? " Then tap <b>Book</b> in JustBet to get a booking code to share." : "");
   const legs = [...(parlayLegs[key] || [])].sort((a, b) => a.m.date.localeCompare(b.m.date));
   const done = ticked[key] ??= new Set();
   const when = d => new Date(d).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
@@ -789,7 +803,7 @@ function openChecklist(key, title) {
     const id = `${l.m.id}:${l.k}`, bk = bookOf(l.m, l.k);
     return `<div class="ck${done.has(id) ? " done" : ""}"><input type="checkbox" data-tick="${key}|${id}" ${done.has(id) ? "checked" : ""}>
       <div class="w"><b>${esc(l.m.home.name)} v ${esc(l.m.away.name)}</b><small>${esc(when(l.m.date))}</small>
-        ${esc((JB_MARKET[l.k] || (() => l.label))(l))}${bk ? ` <small>${esc(bookName(l.m))} ${bk.toFixed(2)}</small>` : ""}</div>
+        ${esc((names[l.k] || (() => l.label))(l))}${bk ? ` <small>${esc(bookName(l.m))} ${bk.toFixed(2)}</small>` : ""}</div>
       <button class="btn ghost cp" data-copy="${esc(l.m.home.name)} ${esc(l.m.away.name)}">Copy</button></div>`;
   }).join("");
   const fair = legs.reduce((x, l) => x * 100 / l.p, 1), bk = bookTotal(legs);
@@ -1354,7 +1368,9 @@ document.getElementById("closeSlip").onclick = () => { slipSheet.hidden = true; 
 slipSheet.onclick = e => {
   if (e.target === slipSheet) { slipSheet.hidden = true; return; }
   const c = e.target.closest("[data-copy]");
-  if (c) { copyText(c.dataset.copy, "Match copied: paste it into JustBet's search"); return; }
+  if (c) { copyText(c.dataset.copy, `Match copied: paste it into ${slipBook}'s search`); return; }
+  const bb = e.target.closest("[data-book]");
+  if (bb) { slipBook = bb.dataset.book; saveLS("slipBook", slipBook); if (openSlip) openChecklist(...openSlip); return; }
   const t = e.target.closest("[data-tick]");
   if (t) {
     const [key, id] = t.dataset.tick.split("|"), set = ticked[key] ??= new Set();
